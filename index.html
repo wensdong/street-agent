@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>STREET / AGENT v3.52</title>
+<title>STREET / AGENT v3.59</title>
 <style>
   :root {
     --amber: #ffb347;
@@ -224,7 +224,7 @@
   <div class="box">
     <h1>STREET <span>/</span> AGENT</h1>
     <div class="sub" id="ovsub">Sector 7 · night watch</div>
-    <div class="verline">v3.52 — C to crawl / stand · PURSUIT: N = restart · K lights · F reflections · VERTICAL 9:16 (O)</div>
+    <div class="verline">v3.59 — gunslinger, ranger, hit reactions, real falls, own gun sounds · C to crawl · PURSUIT: N = restart · K lights · F reflections · VERTICAL 9:16 (O)</div>
     <div class="profiles">
       <button id="profDay" class="pbtn" type="button">DAY</button>
       <button id="profCyber" class="pbtn" type="button">CYBERPUNK</button>
@@ -477,7 +477,7 @@ function setMSAASamples(n) {
 function updateBadge() {
   const el = document.getElementById("ver");
   const MAPTAG = { street: "SECTOR 7", arena: "OVERRUN YARD", neon: "SUNSET VIADUCT" };
-  if (el) el.innerHTML = 'STREET/AGENT <b>v3.52</b> · ' + (envName === "pursuit" ? "IN THE CAR" : (thirdPerson ? "3RD" : "1ST") + " PERSON" + (player.crawling ? " · CRAWLING" : "")) + " · "
+  if (el) el.innerHTML = 'STREET/AGENT <b>v3.59</b> · ' + (envName === "pursuit" ? "IN THE CAR" : (thirdPerson ? "3RD" : "1ST") + " PERSON" + (player.crawling ? " · CRAWLING" : "")) + " · "
     + ENV[envName].label + " · " + (MAPTAG[curMap] || curMap.toUpperCase());
 }
 
@@ -1547,7 +1547,7 @@ const ENV = {
             envInt: 0.80, tube: [0.35, 0.55, 0.75], roadInt: 1.9, puddleInt: 2.4, blobs: 0.25,
             vig: 0.42, grain: 0.008 },
 };
-// PURSUIT: the CYBERPUNK viaduct and grade, played from the car (v3.52) —
+// PURSUIT: the CYBERPUNK viaduct and grade, played from the car (v3.53) —
 // see the Pursuit module; `drive` is what switches the controls.
 ENV.pursuit = { ...ENV.cyber, label: "PURSUIT", drive: true };
 const ENV_ORDER = ["day", "cyber", "pursuit", "kabuki", "hunted"];
@@ -5731,7 +5731,16 @@ const Audio_ = (() => {
   return {
     resume() { ensure(); if (ac.state === "suspended") ac.resume(); },
     shot() { noise(0.16, "lowpass", 3200, 260, 0.85, 1); tone(0.1, 160, 45, 0.42, "square"); },
-    enemyShot(d) { const v = clamp(0.5 - d * 0.012, 0.05, 0.5); noise(0.13, "lowpass", 2400, 220, v, 1); },
+    // v3.59: every weapon has its own voice
+    enemyShot(d, model) {
+      const v = clamp(0.5 - d * 0.012, 0.05, 0.5);
+      if (model === "pistol") { noise(0.08, "bandpass", 3400, 900, v * 0.9, 1.3); tone(0.05, 900, 300, v * 0.25, "square"); }
+      else if (model === "smg") noise(0.07, "lowpass", 3200, 500, v * 0.75, 1);
+      else if (model === "marksman") { noise(0.36, "lowpass", 2800, 110, v * 1.15, 1); tone(0.28, 170, 45, v * 0.45, "sine"); }
+      else if (model === "shotgun") { noise(0.45, "lowpass", 1300, 55, v * 1.35, 0.8); tone(0.32, 115, 34, v * 0.7, "sine"); }
+      else if (model === "lmg") { noise(0.13, "lowpass", 1800, 140, v * 1.05, 1); tone(0.09, 130, 60, v * 0.4, "square"); }
+      else noise(0.13, "lowpass", 2400, 220, v, 1);
+    },
     whiz() { noise(0.1, "bandpass", 2600, 900, 0.32, 8); },
     flesh() { noise(0.1, "lowpass", 700, 110, 0.55, 1); },
     kill() { tone(0.25, 240, 60, 0.3, "triangle"); noise(0.22, "lowpass", 500, 80, 0.4, 1); },
@@ -6287,137 +6296,715 @@ function soleHeight(leg) {
 }
 
 const ENEMY_LOADOUTS = [
-  { name: 'SMG', length: 0.68, burst: 5, interval: 0.075, cooldown: 1.8, range: 6, spread: 1.45, damage: 7 },
-  { name: 'Carbine', length: 0.94, burst: 3, interval: 0.14, cooldown: 2.1, range: 10, spread: 1, damage: 10 },
-  { name: 'Marksman', length: 1.28, burst: 1, interval: 0.4, cooldown: 2.8, range: 17, spread: 0.55, damage: 15 },
+  { name: 'SMG', model: 'smg', length: 0.68, burst: 5, interval: 0.075, cooldown: 1.8, range: 6, spread: 1.45, damage: 7 },
+  { name: 'Carbine', model: 'carbine', length: 0.94, burst: 3, interval: 0.14, cooldown: 2.1, range: 10, spread: 1, damage: 10 },
+  { name: 'Marksman', model: 'marksman', length: 1.28, burst: 1, interval: 0.4, cooldown: 2.8, range: 17, spread: 0.55, damage: 15 },
+  { name: 'Pistol', model: 'pistol', length: 1, burst: 2, interval: 0.22, cooldown: 1.5, range: 8, spread: 1.2, damage: 8 },
+  { name: 'Shotgun', model: 'shotgun', length: 1, burst: 1, interval: 0.5, cooldown: 1.9, range: 5, spread: 1.9, damage: 18 },
+  { name: 'LMG', model: 'lmg', length: 1, burst: 7, interval: 0.085, cooldown: 2.6, range: 12, spread: 1.3, damage: 7 },
 ];
 const ENEMY_PEOPLE = [
   { name: 'Mara', gender: 'woman', skin: 0xb47854, hair: 0x201713, cloth: 0x667882 },
   { name: 'Jonas', gender: 'man', skin: 0xd0a17d, hair: 0x493120, cloth: 0x777052 },
-  { name: 'Nia', gender: 'woman', skin: 0x70472f, hair: 0x121014, cloth: 0x897080 },
+  { name: 'Nia', gender: 'woman', skin: 0x70472f, hair: 0x1c6572, cloth: 0x897080 },
   { name: 'Rafi', gender: 'man', skin: 0x98704e, hair: 0x191719, cloth: 0x64765d },
-  { name: 'Elena', gender: 'woman', skin: 0xe0b695, hair: 0x703a21, cloth: 0x566f83 },
+  { name: 'Elena', gender: 'woman', skin: 0xe0b695, hair: 0x9a3218, cloth: 0x566f83 },
   { name: 'Dev', gender: 'man', skin: 0x64412c, hair: 0x181214, cloth: 0x89705b },
 ];
 let enemyPersonIndex = 0;
 // Shared smooth geometry keeps close-up faces rounded without duplicating
 // vertex buffers for every eye, ear and strand across the crowd.
 const faceOvalGeometry = new THREE.SphereGeometry(1, 24, 18);
+// v3.54 faces. One bent sphere is the whole face — flatter at the front, a
+// touch of cheekbone, a jaw that narrows to the chin and two shallow sockets
+// the eyes sit in — so the head reads as a head rather than a ball with
+// features stuck on. Built once per build (man / woman) and shared.
+const faceMaskGeo = {};
+function faceMask(female) {
+  const k = female ? "w" : "m";
+  if (faceMaskGeo[k]) return faceMaskGeo[k];
+  const g = new THREE.SphereGeometry(1, 40, 30), pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    let x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    if (y < 0) x *= 1 - (-y) * (female ? 0.40 : 0.30);                 // jaw narrows
+    if (y < -0.55 && z > 0) z *= 1 + (-y - 0.55) * 0.22;                // chin forward
+    x *= 1 + 0.05 * Math.exp(-((y + 0.05) ** 2) / 0.05);                 // cheekbones
+    if (z > 0.45) z = 0.45 + (z - 0.45) * 0.84;                          // flatter front
+    if (z < 0) { x *= 1 + z * 0.24; z *= 0.55; }                          // back half tucks inside the skull (v3.55: it showed through the hair)
+    if (z > 0) for (const sx of [-1, 1])                                 // eye sockets
+      z -= 0.045 * Math.exp(-((x - sx * 0.40) ** 2) / 0.028 - ((y - 0.20) ** 2) / 0.018);
+    pos.setXYZ(i, x, y, z);
+  }
+  g.computeVertexNormals();
+  return faceMaskGeo[k] = g;
+}
+// v3.55 hair. What made v3.54's hair read as a HAT: one smooth, uniform
+// dome with a hard lower edge standing proud of the skin. Now every hair
+// surface carries a strand texture whose last ~15% is cut into tapered
+// locks (alphaTest), so hairlines and tips are ragged, not a brim; caps sit
+// almost flush on the cranium; long hair grows out of the cap and falls.
+let _hairTex = null;
+function hairStrandTex() {
+  if (_hairTex) return _hairTex;
+  const W = 256, H = 256, cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const cx = cv.getContext("2d"), img = cx.createImageData(W, H), d = img.data;
+  const tone = new Float32Array(W), cut = new Float32Array(W);
+  let v = 0.85, end = 0.9;
+  for (let i = 0; i < W; i++) {
+    if (Math.random() < 0.5) v = 0.60 + Math.random() * 0.45;
+    tone[i] = v;
+    if (i % 6 === 0) end = 0.80 + Math.random() * 0.18;
+    cut[i] = end - 0.05 * Math.abs((i % 6) - 2.5) / 2.5;          // each lock tapers to a point
+  }
+  for (let y = 0; y < H; y++) for (let i = 0; i < W; i++) {
+    const w = Math.round(Math.sin(y * 0.045 + i * 0.21) * 1.6);
+    const g = Math.min(255, 255 * tone[(i + w + W) % W] * (0.93 + 0.07 * Math.sin(y * 0.19 + i * 1.7)));
+    const k = (y * W + i) * 4;
+    d[k] = d[k + 1] = d[k + 2] = g; d[k + 3] = y / H < cut[i] ? 255 : 0;
+  }
+  cx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(cv);
+  t.flipY = false; t.wrapS = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return _hairTex = t;
+}
+function hairMaterial(color, opts = {}) {
+  return new THREE.MeshStandardMaterial({ color, map: hairStrandTex(), alphaTest: 0.5,
+    side: THREE.DoubleSide, roughness: opts.roughness ?? 0.62, metalness: 0 });
+}
+// A cap on the cranium whose lower edge is the hairline. u runs around the
+// head (strands repeat 7x), v from the crown down to the edge, so the texture's
+// locks land exactly on the hairline. puff = volume at the front-top,
+// curl = tight bumps (curly hair), tight = how close it hugs the skull.
+const hairShellGeo = {};
+function hairShell(front, back, sides, puff = 0, curl = 0) {
+  const k = [front, back, sides, puff, curl].join("/");
+  if (hairShellGeo[k]) return hairShellGeo[k];
+  const R = 18, C = 64, v = [], uv = [], idx = [];
+  for (let c = 0; c <= C; c++) {
+    const th = c / C * Math.PI * 2, sx = Math.sin(th), cz = Math.cos(th);
+    const t = (cz + 1) / 2;
+    let thr = back + (front - back) * t * t;
+    // arch up and over the ear only (the ear sits just forward of centre)
+    const ear = Math.max(0, Math.abs(sx) - 0.6) / 0.4 * Math.exp(-((cz - 0.08) ** 2) / 0.09);
+    thr = thr + (Math.max(thr, sides) - thr) * Math.min(1, ear * 1.8);
+    const phMax = Math.acos(Math.max(-0.98, Math.min(0.98, thr)));
+    for (let r = 0; r <= R; r++) {
+      const ph = phMax * r / R, y = Math.cos(ph), rr = Math.sin(ph);
+      let m = 1 + puff * Math.max(0, y - 0.2) * Math.max(0, cz + 0.2);
+      if (curl) m *= 1 + curl * (0.55 + 0.45 * Math.sin(th * 23 + ph * 5) * Math.sin(ph * 19 + th * 3)) * Math.min(1, r / 3);
+      v.push(rr * sx * m, y * (1 + puff * 0.3 * Math.max(0, cz)) * (curl ? 1 + curl * 0.6 : 1), rr * cz * m);
+      uv.push(c / C * 7, r / R);
+    }
+  }
+  for (let c = 0; c < C; c++) for (let r = 0; r < R; r++) {
+    const a = c * (R + 1) + r, b = (c + 1) * (R + 1) + r;
+    idx.push(a, a + 1, b, b, a + 1, b + 1);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(v, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx); g.computeVertexNormals();
+  return hairShellGeo[k] = g;
+}
+// Long hair: grows out of the cap at `top` and falls to `bottom`, framing the
+// face (open = half-angle of the gap in front), widening over ears and
+// shoulders; wave = loose waves, flick = ends turning out (a bob).
+function hairCurtain({ top = 0.262, bottom = -0.12, open = 0.78, wave = 0, flick = 0, back = 0 }) {
+  const R = 22, C = 48, v = [], uv = [], idx = [];
+  for (let c = 0; c <= C; c++) {
+    const a = open + c / C * (Math.PI * 2 - open * 2), sa = Math.sin(a), ca = Math.cos(a);
+    for (let r = 0; r <= R; r++) {
+      const t = r / R, y = top + (bottom - top) * t;
+      const grow = Math.min(1, t / 0.28) ** 0.55;               // out of the cap, over the ears
+      let w = 0.078 + 0.050 * grow, dep = 0.084 + 0.044 * grow;
+      w += wave * Math.sin(t * 9 + a * 3) * 0.006 * t + flick * Math.max(0, t - 0.8) * 0.10;
+      dep += back * Math.max(0, -ca) * t * 0.05;
+      v.push(sa * w, y, ca * dep - 0.030 - back * Math.max(0, -ca) * t * 0.03);
+      uv.push(c / C * 6, 0.08 + t * 0.92);
+    }
+  }
+  for (let c = 0; c < C; c++) for (let r = 0; r < R; r++) {
+    const a = c * (R + 1) + r, b = (c + 1) * (R + 1) + r;
+    idx.push(a, a + 1, b, b, a + 1, b + 1);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(v, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+// A tube that tapers to a point (ponytail), strands along its length.
+function hairTail(points, r0) {
+  const path = new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(...p)));
+  const g = new THREE.TubeGeometry(path, 24, r0, 10, false);
+  const p = g.attributes.position, uvA = g.attributes.uv, c = new THREE.Vector3(), q = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    const u = uvA.getX(i);
+    path.getPointAt(u, c); q.fromBufferAttribute(p, i).sub(c);
+    q.multiplyScalar((1 - 0.75 * u) * (1 + 0.35 * Math.sin(Math.min(1, u * 1.6) * Math.PI)));
+    p.setXYZ(i, c.x + q.x, c.y + q.y, c.z + q.z);
+    uvA.setXY(i, uvA.getY(i) * 3, 0.1 + u * 0.9);            // strands run along the tail
+  }
+  g.computeVertexNormals();
+  return g;
+}
+// Beard / stubble: the part of the face mask below the cheekbones, minus the lips.
+const beardGeoC = {};
+function beardGeo(female, kind) {
+  const k = (female ? "w" : "m") + kind;
+  if (beardGeoC[k]) return beardGeoC[k];
+  const src = faceMask(female).toNonIndexed(), p = src.attributes.position, u = src.attributes.uv, out = [], ouv = [];
+  const top = kind === "full" ? -0.08 : kind === "stubble" ? -0.12 : -0.26;
+  for (let i = 0; i < p.count; i += 3) {
+    let cx = 0, cy = 0, cz = 0;
+    for (let j = 0; j < 3; j++) { cx += p.getX(i + j) / 3; cy += p.getY(i + j) / 3; cz += p.getZ(i + j) / 3; }
+    if (cz < -0.30) continue;
+    const lips = Math.abs(cx) < 0.30 && cy > -0.50 && cy < -0.22 && cz > 0.45;
+    let keep;
+    if (kind === "moustache") keep = Math.abs(cx) < 0.30 && cy > -0.27 && cy < -0.19 && cz > 0.60;
+    else keep = cy < top - Math.max(0, 0.9 - Math.abs(cx) * 1.2) * (kind === "full" ? 0.12 : 0.16) && !lips && !(cy > -0.26 && Math.abs(cx) < 0.18);
+    if (!keep) continue;
+    for (let j = 0; j < 3; j++) { out.push(p.getX(i + j), p.getY(i + j), p.getZ(i + j)); ouv.push(u.getX(i + j) * 12, 0.25 + u.getY(i + j) * 0.3); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(out, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(ouv, 2));
+  g.computeVertexNormals();
+  return beardGeoC[k] = g;
+}
+// Who looks like what: six people, six silhouettes.
+const HAIR_STYLES = {           // cap = [front hairline, nape, over-ear, front volume, curl]
+  Mara:  { cap: [0.50, -0.80, -0.10, 0.03], part: 0,  long: { bottom: -0.20, open: 0.80, back: 1 } },
+  Nia:   { cap: [0.46, -0.80, 0.05, 0.02], part: 0,  tail: true },
+  Elena: { cap: [0.48, -0.80, -0.05, 0.06], part: -1, long: { bottom: 0.015, open: 0.86, wave: 1, flick: 1 } },
+  Jonas: { cap: [0.44, -0.84, -0.12, 0.14], part: 1,  beard: "stubble", face: 1.00, fringe: true },
+  Rafi:  { cap: [0.56, -0.85, 0.14, 0.00], part: 0,  buzz: true, beard: "full", face: 1.03 },
+  Dev:   { cap: [0.50, -0.80, 0.16, 0.06, 0.10], part: 0, beard: "moustache", face: 1.02 },
+};
+// Facial hair is PAINTED into the face's own texture, so its edges are soft
+// and it follows the face exactly (no second shell, no blocky borders).
+// The face mask keeps the sphere's UVs: u = around the head (front = 0.25),
+// v = height. kind: stubble | full | moustache.
+function faceSkinTex(skinHex, hairHex, kind) {
+  const W = 256, H = 128, cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const cx = cv.getContext("2d"), img = cx.createImageData(W, H), d = img.data;
+  const sk = new THREE.Color(skinHex), hr = new THREE.Color(hairHex);
+  const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
+    const phi = (px + 0.5) / W * Math.PI * 2, th = (py + 0.5) / H * Math.PI;
+    const x = -Math.cos(phi) * Math.sin(th), y = Math.cos(th), z = Math.sin(phi) * Math.sin(th);
+    let a = 0;
+    if (kind && z > -0.35) {
+      const mouth = Math.hypot(x / 0.27, (y + 0.37) / 0.10);
+      const lip = 1 - sm(0.85, 1.15, mouth);                       // keep the lips clear
+      const jaw = sm(-0.02, -0.20, y) * sm(-0.35, -0.05, z);
+      const burns = sm(0.78, 0.9, Math.abs(x)) * sm(0.2, 0.0, y) * sm(-0.35, -0.1, z);
+      const tache = 1 - sm(0.8, 1.1, Math.hypot(x / 0.30, (y + 0.235) / 0.055));
+      const cheek = sm(-0.05, -0.16, y - Math.max(0, 0.55 - Math.abs(x)) * 0.25);   // beard line dips toward the mouth
+      if (kind === "moustache") a = tache * 0.92;
+      else a = Math.max(Math.min(jaw, cheek), burns, tache) * (1 - lip * (kind === "full" ? 0.9 : 1)) * (kind === "full" ? 0.92 : 0.42);
+      if (kind === "full" && tache > 0) a = Math.max(a, tache * 0.92);
+    }
+    const n = 0.75 + 0.5 * Math.random();                          // speckle: stubble is dots
+    const k = Math.min(1, a * n), i = (py * W + px) * 4;
+    d[i] = 255 * (sk.r + (hr.r - sk.r) * k) ** (1 / 2.2);
+    d[i + 1] = 255 * (sk.g + (hr.g - sk.g) * k) ** (1 / 2.2);
+    d[i + 2] = 255 * (sk.b + (hr.b - sk.b) * k) ** (1 / 2.2);
+    d[i + 3] = 255;
+  }
+  cx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return t;
+}
+const HEAD_EYE_Y = 0.172;
 function soldierFace(pivot, person) {
   pivot.clear();
   const female = person.gender === 'woman';
+  const style = HAIR_STYLES[person.name] || { cap: female ? [0.48, -0.2, -0.05, 0.04] : [0.52, -0.42, 0.12, 0.18], part: 1 };
   const skinColor = new THREE.Color(person.skin);
-  const skin = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.67 });
-  const lipColor = skinColor.clone().lerp(new THREE.Color(0x9b5155), female ? 0.38 : 0.22);
-  const lips = new THREE.MeshStandardMaterial({color: lipColor, roughness: 0.58});
-  const hair = new THREE.MeshStandardMaterial({ color: person.hair, roughness: 0.76 });
-  const hairSheen = new THREE.MeshStandardMaterial({color:new THREE.Color(person.hair).lerp(new THREE.Color(0x99816b),0.12),roughness:0.72});
-  const dark = new THREE.MeshStandardMaterial({ color: 0x211b1b, roughness: 0.8 });
-  const whites = new THREE.MeshStandardMaterial({ color: 0xd8cec0, roughness: 0.37 });
-  const iris = new THREE.MeshStandardMaterial({color: ['Mara','Dev'].includes(person.name)?0x597066:person.name==='Elena'?0x68818e:0x674c32,roughness:0.38});
-  const oval = (mat,x,y,z,sx,sy,sz) => {
-    const mesh=new THREE.Mesh(faceOvalGeometry,mat);
-    mesh.position.set(x,y,z);mesh.scale.set(sx,sy,sz);pivot.add(mesh);return mesh;
+  const skin = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.62 });
+  const lipColor = skinColor.clone().lerp(new THREE.Color(0xa24a55), female ? 0.46 : 0.14);
+  const lips = new THREE.MeshStandardMaterial({ color: lipColor, roughness: female ? 0.45 : 0.55 });
+  const hairColor = new THREE.Color(person.hair);
+  const hair = hairMaterial(hairColor);
+  const browMat = new THREE.MeshStandardMaterial({ color: person.hair, roughness: 0.76 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x1a1414, roughness: 0.8 });
+  const whites = new THREE.MeshStandardMaterial({ color: 0xcfc5b8, roughness: 0.35 });
+  const iris = new THREE.MeshStandardMaterial({ color: ['Mara', 'Dev'].includes(person.name) ? 0x597066 : person.name === 'Elena' ? 0x68818e : 0x674c32, roughness: 0.38 });
+  const oval = (mat, x, y, z, sx, sy, sz, parent = pivot) => {
+    const mesh = new THREE.Mesh(faceOvalGeometry, mat);
+    mesh.position.set(x, y, z); mesh.scale.set(sx, sy, sz); parent.add(mesh); return mesh;
   };
-  const curve = (mat, points, radius) => {
-    const path=new THREE.CatmullRomCurve3(points.map(p=>new THREE.Vector3(...p)));
-    const mesh=new THREE.Mesh(new THREE.TubeGeometry(path,12,radius,5,false),mat);pivot.add(mesh);return mesh;
+  const curve = (mat, points, radius, parent = pivot) => {
+    const path = new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(...p)));
+    const mesh = new THREE.Mesh(new THREE.TubeGeometry(path, 12, radius, 5, false), mat); parent.add(mesh); return mesh;
   };
-  oval(skin,0,0.02,-0.006,0.047,0.073,0.047);
-  // One continuous jaw/cheek surface, rather than overlapping chin spheres.
-  const faceGeo=faceOvalGeometry.clone(), pos=faceGeo.attributes.position;
-  for(let i=0;i<pos.count;i++) {
-    const x=pos.getX(i),y=pos.getY(i),z=pos.getZ(i);
-    const jaw=1-Math.max(0,-y-0.10)*(female?0.28:0.18);
-    pos.setXYZ(i,x*jaw,y,z*(z>0 && y<0.1?1.035:1));
+  // neck, cranium, face
+  oval(skin, 0, 0.02, -0.012, female ? 0.042 : 0.048, 0.075, female ? 0.042 : 0.048);
+  oval(skin, 0, 0.176, -0.030, 0.099, 0.112, 0.106);
+  const fw = (female ? 0.097 : 0.104) * (style.face || 1);
+  const faceMat = style.beard
+    ? new THREE.MeshStandardMaterial({ map: faceSkinTex(person.skin, person.hair, style.beard), roughness: 0.66 })
+    : skin;
+  const face = new THREE.Mesh(faceMask(female), faceMat);
+  face.position.set(0, 0.147, 0); face.scale.set(fw, 0.134, 0.101); pivot.add(face);
+  // ears (+ small studs for the women)
+  for (const side of [-1, 1]) {
+    oval(skin, side * 0.104, 0.140, -0.022, 0.012, 0.026, 0.018);
+    if (female) oval(new THREE.MeshStandardMaterial({ color: 0xd9b36a, metalness: 0.9, roughness: 0.3 }), side * 0.110, 0.118, -0.016, 0.0045, 0.0045, 0.0045);
   }
-  faceGeo.computeVertexNormals();
-  const face=new THREE.Mesh(faceGeo,skin);face.position.y=0.147;
-  face.scale.set(female?0.102:0.109,0.137,0.103);pivot.add(face);
-  // Small bridge and tip; soft ears and restrained almond-shaped eyes.
-  oval(skin,0,0.143,0.102,0.010,0.027,0.012);
-  oval(skin,0,0.124,0.115,0.013,0.010,0.013);
-  for(const side of [-1,1]) {
-    oval(skin,side*0.104,0.139,-0.003,0.014,0.029,0.020);
-    const x=side*0.040;
-    oval(whites,x,0.168,0.096,0.018,0.0075,0.006);
-    oval(iris,x,0.168,0.102,0.0065,0.0064,0.002);
-    oval(dark,x,0.168,0.104,0.0031,0.004,0.001);
-    oval(whites,x-0.0018,0.170,0.105,0.0014,0.0014,0.0007);
-    curve(skin,[[x-0.019,0.167,0.098],[x,0.175,0.099],[x+0.019,0.167,0.098]],0.0025);
-    curve(skin,[[x-0.018,0.166,0.098],[x,0.161,0.100],[x+0.018,0.166,0.098]],0.002);
-    curve(hair,[[x-0.021,0.189,0.096],[x,0.194,0.096],[x+0.020,0.188,0.094]],female?0.0024:0.0034);
+  // nose: long soft bridge, small tip, two wings (a touch finer for women)
+  const nf = female ? 0.88 : 1;
+  oval(skin, 0, 0.148, 0.083, 0.0085 * nf, 0.026, 0.011);
+  oval(skin, 0, 0.123, 0.089, 0.0098 * nf, 0.0082, 0.0095);
+  for (const side of [-1, 1]) oval(skin, side * 0.0098 * nf, 0.119, 0.083, 0.0068 * nf, 0.0058, 0.0072);
+  // eyes: set into the sockets, with an upper lid + lash line that can blink,
+  // and an iris that can glance (both driven by faceTick)
+  const eyes = [];
+  for (const side of [-1, 1]) {
+    const x = side * 0.041;
+    const eg = new THREE.Group(); eg.position.set(x, HEAD_EYE_Y, 0.074); pivot.add(eg);
+    oval(whites, 0, 0.0010, 0, female ? 0.0178 : 0.0172, 0.0070, 0.0065, eg);   // iris rests on its lower edge
+    const look = new THREE.Group(); eg.add(look);
+    oval(iris, 0, 0, 0.0052, 0.0068, 0.0068, 0.0016, look);
+    oval(dark, 0, 0, 0.0064, 0.0031, 0.0037, 0.0008, look);
+    oval(whites, -0.0017, 0.0018, 0.0070, 0.0013, 0.0013, 0.0006, look);
+    const lash = oval(dark, female ? side * 0.0012 : 0, 0.0097, 0.0001, female ? 0.0212 : 0.0200, 0.0055, 0.0067, eg);
+    const lid = oval(skin, 0, 0.0105, 0.0004, 0.0300, 0.0047, 0.0067, eg);   // wide: its edge runs nearly flat across the eye
+    // brow: women thinner and arched, men heavier and straighter
+    if (female) curve(browMat, [[x - side * 0.020, 0.1885, 0.078], [x - side * 0.004, 0.1985, 0.083], [x + side * 0.021, 0.1925, 0.079]], 0.0019);
+    else curve(browMat, [[x - side * 0.021, 0.1905, 0.079], [x - side * 0.002, 0.1950, 0.083], [x + side * 0.020, 0.1905, 0.080]], 0.0034);
+    eyes.push({ look, lid, lash, lashX: female ? 0.0012 * side : 0 });
   }
-  curve(lips,[[-0.025,0.087,0.094],[-0.010,0.089,0.099],[0,0.087,0.101],[0.010,0.089,0.099],[0.025,0.087,0.094]],0.0028);
-  curve(lips,[[-0.022,0.084,0.095],[0,0.081,0.101],[0.022,0.084,0.095]],0.0034);
-  const cap=new THREE.Mesh(new THREE.SphereGeometry(1,28,20,0,Math.PI*2,0,Math.PI*0.47),hair);
-  cap.position.set(0,0.178,-0.018);cap.scale.set(0.114,0.115,0.112);pivot.add(cap);
-  const part=person.name==='Elena'||person.name==='Rafi'?-1:1;
-  // Swept locks overlap the hairline, with subtle strand highlights.
-  const fringe=oval(hair,part*0.008,0.247,0.063,0.094,0.039,0.032);
-  fringe.rotation.z=part*0.16;
-  for(let i=0;i<5;i++) {
-    const x=(i-2)*0.023;
-    if(!female) curve(hairSheen,[[x-part*0.011,0.266,0.066],[x,0.245,0.085],[x+part*0.010,0.222,0.087]],0.0009);
+  // mouth: fuller for the women, and a soft parting line
+  const lr = female ? 1.3 : 1;
+  curve(lips, [[-0.020, 0.0905, 0.080], [-0.008, 0.0925, 0.0845], [0, 0.0915, 0.0855], [0.008, 0.0925, 0.0845], [0.020, 0.0905, 0.080]], 0.0026 * lr);
+  curve(lips, [[-0.017, 0.0862, 0.081], [0, 0.0832, 0.0858], [0.017, 0.0862, 0.081]], 0.0032 * lr);
+  curve(dark, [[-0.019, 0.0888, 0.0815], [0, 0.0886, 0.0862], [0.019, 0.0888, 0.0815]], 0.0009);
+  // hair: a fitted cap, then the person's style on top
+  const cap = style.cap;
+  const capMat = style.buzz ? hairMaterial(hairColor.clone().lerp(skinColor, 0.12), { roughness: 0.9 }) : hair;
+  const shell = new THREE.Mesh(hairShell(cap[0], cap[1], cap[2], cap[3], cap[4] || 0), capMat);
+  const tight = style.buzz ? 1.024 : 1.045;
+  shell.position.set(0, 0.176, -0.030); shell.scale.set(0.099 * tight, 0.112 * tight, 0.106 * tight); pivot.add(shell);
+  if (style.part) {                                    // a visible side parting
+    const pm = new THREE.MeshStandardMaterial({ color: skinColor.clone().lerp(hairColor, 0.5), roughness: 0.8 });
+    curve(pm, [[style.part * 0.030, 0.287, -0.02], [style.part * 0.032, 0.284, 0.035], [style.part * 0.033, 0.268, 0.065]], 0.0012);
   }
-  if(female) {
-    // A continuous hair curtain gives a readable silhouette from every angle.
-    // Leave a wide opening at the front so the face stays visible.
-    const ponytail = person.name === 'Nia';
-    const bottom = person.name === 'Mara' ? -0.115 : ponytail ? 0.07 : -0.045;
-    const hairGeo = new THREE.BufferGeometry(), vertices = [], indices = [];
-    const rows = 14, columns = 36;
-    for(let row=0;row<=rows;row++) {
-      const t=row/rows, y=0.225+(bottom-0.225)*t;
-      for(let column=0;column<=columns;column++) {
-        const angle=0.79+column/columns*(Math.PI*2-1.58);
-        const width=0.110+Math.sin(t*Math.PI/2)*0.024;
-        const wave=ponytail?0:Math.sin(t*7+angle*2)*0.004*t;
-        vertices.push(Math.sin(angle)*(width+wave),y+Math.sin(angle*5)*0.007*t*t,
-          Math.cos(angle)*(0.120+t*0.019)-0.014);
-        if(row<rows && column<columns) {
-          const v=row*(columns+1)+column;
-          indices.push(v,v+1,v+columns+1,v+1,v+columns+2,v+columns+1);
-        }
-      }
+  if (style.fringe) {                                   // long swept fringe falling over one eye
+    const fm = new THREE.MeshStandardMaterial({ color: hairColor, roughness: 0.7 });
+    const p = style.part || 1;
+    for (const [x, y, z, sx, sy, rz] of [[p * 0.030, 0.232, 0.080, 0.050, 0.030, p * 0.5], [-p * 0.010, 0.212, 0.086, 0.045, 0.040, p * 0.75], [-p * 0.038, 0.192, 0.083, 0.030, 0.045, p * 0.95]]) {
+      const l = oval(fm, x, y, z, sx, sy, 0.013); l.rotation.z = rz; l.rotation.x = -0.25;
     }
-    hairGeo.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));
-    hairGeo.setIndex(indices);hairGeo.computeVertexNormals();
-    const curtainMat=hair.clone();curtainMat.side=THREE.DoubleSide;
-    pivot.add(new THREE.Mesh(hairGeo,curtainMat));
-    // Thin swept pieces frame the cheeks rather than covering them.
-    for(const side of [-1,1]) {
-      curve(hair,[[side*0.084,0.239,0.060],[side*0.106,0.168,0.051],
-        [side*0.116,0.072,0.035],[side*0.109,ponytail?0.052:bottom+0.012,0.01]],0.011);
+  }
+  const sway = new THREE.Group(); sway.position.set(0, 0.23, -0.03); pivot.add(sway);
+  const inSway = (m) => { m.position.sub(sway.position); sway.add(m); return m; };   // same place, now hung from the sway pivot
+  if (style.long) inSway(new THREE.Mesh(hairCurtain(style.long), hair));
+  if (style.tail) {
+    oval(hair, 0, 0.262, -0.118, 0.040, 0.036, 0.034);                          // gathered at the crown-back
+    const tie = new THREE.Mesh(new THREE.TorusGeometry(0.024, 0.006, 6, 14), new THREE.MeshStandardMaterial({ color: 0x8e435b, roughness: 0.65 }));
+    tie.position.set(0, 0.255, -0.142); tie.rotation.x = 1.1; pivot.add(tie);
+    inSway(new THREE.Mesh(hairTail([[0, 0.262, -0.150], [0.01, 0.20, -0.205], [0.03, 0.08, -0.215], [0.05, -0.06, -0.19]], 0.034), hair));
+  }
+  pivot.userData.face = { eyes, sway, female, blink: -1, nextBlink: 1 + Math.random() * 3,
+    gx: 0, gy: 0, tgx: 0, tgy: 0, nextSaccade: 0, t: Math.random() * 9 };
+}
+function faceClose(pivot) {
+  const f = pivot && pivot.userData.face;
+  if (!f) return;
+  for (const e of f.eyes) { e.lid.scale.y = 0.0089; e.lid.position.y = -0.0082 + 0.0089; e.lash.position.y = -0.0082 + 0.0089 - 0.0008; e.lash.scale.y = 0.0097; }
+}
+// Eyes and hair, once per frame per character: blinks every 2-6 s (now and
+// then a double), eyes find the target in quick saccades with small drift,
+// and loose hair lags and flutters in the wind (wind 0..1).
+const _ftV = new THREE.Vector3();
+function faceTick(pivot, dt, target, wind = 0) {
+  const f = pivot.userData.face;
+  if (!f) return;
+  f.t += dt;
+  if (f.blink < 0 && (f.nextBlink -= dt) <= 0) { f.blink = 0; f.nextBlink = Math.random() < 0.15 ? 0.25 : 2 + Math.random() * 4; }
+  let close = 0;
+  if (f.blink >= 0) { f.blink += dt / 0.16; close = Math.sin(Math.min(1, f.blink) * Math.PI); if (f.blink >= 1) f.blink = -1; }
+  if ((f.nextSaccade -= dt) <= 0) {
+    f.nextSaccade = 0.35 + Math.random() * 1.4;
+    let yaw = 0, pit = 0;
+    if (target) {
+      _ftV.copy(target); pivot.worldToLocal(_ftV);
+      _ftV.y -= HEAD_EYE_Y;
+      if (_ftV.z > 0.05) { yaw = Math.atan2(_ftV.x, _ftV.z); pit = Math.atan2(_ftV.y, Math.hypot(_ftV.x, _ftV.z)); }
     }
-    for(let strand=0;strand<11;strand++) {
-      const angle=0.84+strand/10*(Math.PI*2-1.68), points=[];
-      for(let row=0;row<5;row++) {
-        const t=row/4;
-        points.push([Math.sin(angle)*(0.112+Math.sin(t*Math.PI/2)*0.024),
-          0.219+(bottom-0.219)*t,Math.cos(angle)*(0.122+t*0.019)-0.014]);
-      }
-      curve(hairSheen,points,0.0008);
-    }
-    if(ponytail) {
-      oval(hair,0,0.20,-0.12,0.045,0.052,0.037);
-      curve(hair,[[0,0.20,-0.13],[0.035,0.13,-0.19],[0.085,0.015,-0.18],[0.13,-0.11,-0.14]],0.030);
-      curve(hairSheen,[[0.009,0.20,-0.156],[0.055,0.12,-0.206],[0.105,0,-0.195],[0.135,-0.10,-0.155]],0.0012);
-      const tie=new THREE.Mesh(new THREE.TorusGeometry(0.032,0.007,6,14),new THREE.MeshStandardMaterial({color:0x8e435b,roughness:0.65}));
-      tie.position.set(0.015,0.175,-0.15);tie.rotation.x=0.7;pivot.add(tie);
-    }
-    fringe.scale.set(0.078,0.026,0.019);fringe.position.set(part*0.014,0.242,0.076);
+    f.tgx = clamp(yaw + (Math.random() - 0.5) * 0.12, -0.55, 0.55);
+    f.tgy = clamp(pit + (Math.random() - 0.5) * 0.08, -0.35, 0.35);
+  }
+  const k = 1 - Math.exp(-28 * dt);                     // saccades are fast
+  f.gx += (f.tgx - f.gx) * k; f.gy += (f.tgy - f.gy) * k;
+  // the lid's lower edge: just over the iris when open, below the eye when shut
+  const open = 0.0058 - Math.max(0, -f.gy) * 0.006;    // lids follow a downward look
+  for (const e of f.eyes) {
+    e.look.position.set(f.gx * 0.0085, f.gy * 0.0045, 0);
+    const edge = open + (-0.0082 - open) * close, sy = 0.0047 + 0.0042 * close;
+    e.lid.position.y = edge + sy; e.lid.scale.y = sy;
+    e.lash.position.y = edge + sy - 0.0008; e.lash.scale.y = sy + 0.0008;
+  }
+  f.sway.rotation.x = -wind * (0.20 + Math.sin(f.t * 13) * 0.035 + Math.sin(f.t * 7.3) * 0.02) + Math.sin(f.t * 1.3) * 0.008;
+  f.sway.rotation.z = wind * Math.sin(f.t * 9.1) * 0.04 + Math.sin(f.t * 0.9) * 0.006;
+}
 
-  } else {
-    // Short sideburns leave the jaw and mouth readable.
-    for(const side of [-1,1]) oval(hair,side*0.102,0.190,-0.004,0.009,0.031,0.022);
+// v3.57 bodies + outfits. Two things made the hostiles read as robots built
+// from parts: a bucket torso (straight cylinder, flat top, no shoulders) and
+// straight tube limbs with gaps at the knees and waist. Every body part is now
+// a smooth solid of revolution from a sculpted radius profile — waist, ribs,
+// chest, rounded shoulders into the neck; thigh, calf, bicep, forearm — and
+// the joints (shoulder, elbow, knee, pelvis) are filled. Outfits keep one
+// signature colour each (anime readability) but vary: tank top and shorts,
+// bomber and shorts, combat vest over a tee, not everyone covered head to toe.
+function addRim(mat, hex, power = 2.6, strength = 0.55) {
+  const col = new THREE.Color(hex).multiplyScalar(strength);
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uRim = { value: col };
+    sh.fragmentShader = "uniform vec3 uRim;\n" + sh.fragmentShader.replace("#include <emissivemap_fragment>",
+      "#include <emissivemap_fragment>\n{ float rimF = 1.0 - saturate(dot(normal, normalize(vViewPosition)));\n  totalEmissiveRadiance += uRim * pow(rimF, " + power.toFixed(1) + "); }");
+  };
+  mat.customProgramCacheKey = () => "rim" + power.toFixed(1);
+  mat.needsUpdate = true;
+}
+// smooth solid of revolution through [radius, y] control points (any order)
+const _latheC = {};
+function latheSolid(key, ctrl, segs = 18) {
+  if (_latheC[key]) return _latheC[key];
+  const sorted = [...ctrl].sort((a, b) => a[1] - b[1]);
+  const pts = new THREE.SplineCurve(sorted.map(([r, y]) => new THREE.Vector2(r, y))).getPoints(28);
+  pts.unshift(new THREE.Vector2(0.0005, pts[0].y)); pts.push(new THREE.Vector2(0.0005, pts[pts.length - 1].y));
+  const g = new THREE.LatheGeometry(pts, segs);
+  g.computeVertexNormals();
+  return _latheC[key] = g;
+}
+const BODY = {
+  // torso, mesh-local (the mesh sits 0.07 above the chest pivot): waist -> chest -> shoulders -> neck
+  torso: f => latheSolid("torso" + f, f
+    ? [[0.136, -0.25], [0.126, -0.17], [0.138, -0.07], [0.163, 0.03], [0.174, 0.11], [0.177, 0.16], [0.166, 0.20], [0.132, 0.226], [0.086, 0.242], [0.052, 0.256], [0.046, 0.276]]
+    : [[0.150, -0.25], [0.140, -0.17], [0.150, -0.07], [0.186, 0.03], [0.213, 0.11], [0.215, 0.16], [0.201, 0.20], [0.160, 0.228], [0.112, 0.246], [0.070, 0.262], [0.058, 0.278]], 22),   // V: broad chest, narrow waist, traps into the neck
+  pelvis: f => latheSolid("pelvis" + f, f
+    ? [[0.02, -0.10], [0.105, -0.085], [0.168, -0.04], [0.176, 0.02], [0.150, 0.08], [0.132, 0.12]]
+    : [[0.02, -0.10], [0.100, -0.085], [0.158, -0.04], [0.168, 0.02], [0.160, 0.08], [0.148, 0.12]], 20),
+  thigh: f => latheSolid("thigh" + f, [[0.03, -0.53], [0.061, -0.50], [0.065, -0.44], [0.078, -0.30], [f ? 0.093 : 0.089, -0.15], [f ? 0.098 : 0.093, -0.05], [0.086, 0.02], [0.04, 0.05]]),
+  shin: () => latheSolid("shin", [[0.03, -0.40], [0.041, -0.37], [0.044, -0.30], [0.058, -0.17], [0.066, -0.08], [0.060, -0.01], [0.04, 0.03]]),
+  upperArm: () => latheSolid("uarm", [[0.03, -0.55], [0.058, -0.50], [0.063, -0.30], [0.060, -0.05], [0.050, 0.30], [0.046, 0.46], [0.03, 0.52]], 14),
+  foreArm: () => latheSolid("farm", [[0.03, -0.52], [0.046, -0.46], [0.052, -0.28], [0.046, 0.05], [0.036, 0.40], [0.033, 0.48], [0.02, 0.52]], 14),
+  upperArmM: () => latheSolid("uarmM", [[0.03, -0.56], [0.066, -0.50], [0.072, -0.34], [0.074, -0.12], [0.060, 0.18], [0.047, 0.44], [0.03, 0.52]], 14),
+  foreArmM: () => latheSolid("farmM", [[0.03, -0.52], [0.050, -0.46], [0.060, -0.30], [0.052, -0.02], [0.038, 0.38], [0.034, 0.48], [0.02, 0.52]], 14),
+  sleeve: () => latheSolid("sleeve", [[0.03, -0.56], [0.071, -0.50], [0.073, -0.10], [0.069, 0.40], [0.058, 0.50], [0.03, 0.54]], 14),
+  shorts: (long) => latheSolid("shorts" + long, long
+    ? [[0.04, -0.38], [0.102, -0.35], [0.106, -0.20], [0.104, -0.05], [0.094, 0.03], [0.04, 0.06]]
+    : [[0.04, -0.26], [0.104, -0.23], [0.106, -0.12], [0.102, -0.02], [0.092, 0.03], [0.04, 0.06]]),
+};
+// body types: height, shoulder/torso width, arm and leg thickness, muscle
+const BUILDS = {
+  Nia:   { h: 0.89, sh: 0.90, arm: 0.84, leg: 0.90 },                       // short, slim
+  Mara:  { h: 1.00, sh: 0.94, arm: 0.86, leg: 0.94 },                       // tall, slender
+  Elena: { h: 0.93, sh: 0.97, arm: 0.90, leg: 1.08, hips: 1.08 },           // average, fuller hips and legs
+  Jonas: { h: 1.00, sh: 1.00, arm: 1.00, leg: 1.00 },                       // lean
+  Rafi:  { h: 1.05, sh: 1.17, arm: 1.30, leg: 1.16, muscle: true },         // tall, broad, heavy
+  Dev:   { h: 0.95, sh: 1.10, arm: 1.22, leg: 1.12, muscle: true },         // short, stocky, strong
+  Operator: { h: 1.00, sh: 1.08, arm: 1.12, leg: 1.04, muscle: true },      // you: fit, capable
+};
+const OUTFITS = {
+  Mara:  { look: "coat",    top: 0x9e1b2a, collar: 0x7a1220, pants: 0x131418, glow: 0xff2a44, sleeves: "long",  legs: "long" },
+  Nia:   { look: "tank",    top: 0xeef1f4, collar: 0xeef1f4, pants: 0x121317, glow: 0x25f0ff, sleeves: "none",  legs: "shorts", shoes: 0xeef2f5, rough: 0.6 },
+  Elena: { look: "bomber",  top: 0xe3a91d, collar: 0x2a2620, pants: 0x3a5a8a, glow: 0xffd23a, sleeves: "long",  legs: "shorts" },
+  Jonas: { look: "ranger",  top: 0x17181c, collar: 0x17181c, pants: 0x3a3d44, glow: 0x9dff3a, sleeves: "long",  legs: "long", rimK: 0.7 },
+  Rafi:  { look: "gunslinger", top: 0x4f6a8a, collar: 0x4f6a8a, pants: 0x2a2f3a, glow: 0xff7a1a, sleeves: "rolled", legs: "long", rimK: 0.6 },
+  Operator: { look: "operator", kit: true, top: 0x2b3240, collar: 0x1d2530, pants: 0x2a2e36, glow: 0x7fd4ff, sleeves: "short", legs: "long", rimK: 0.5 },
+  Dev:   { look: "vest",    top: 0xe8e6e0, collar: 0x5b3f8f, pants: 0x5a5440, glow: 0xb35cff, sleeves: "short", legs: "cargo" },
+};
+// v3.59 gear. What makes the reference characters (Marston, Leon, Lara...)
+// read as people rather than mannequins is LAYERING: a vest over a shirt, a
+// strap or bandolier crossing the chest, a belt with a buckle, a holster, a
+// hat or a fringe breaking the head's outline. Built here per character.
+function latheShell(key, ctrl, phiStart, phiLen, segs = 22) {
+  if (_latheC[key]) return _latheC[key];
+  const sorted = [...ctrl].sort((a, b) => a[1] - b[1]);
+  const pts = new THREE.SplineCurve(sorted.map(([r, y]) => new THREE.Vector2(r, y))).getPoints(24);
+  const g = new THREE.LatheGeometry(pts, segs, phiStart, phiLen);
+  g.computeVertexNormals();
+  return _latheC[key] = g;
+}
+function addGear(look, parts, body, chest, cloth, vest, skin, pants, glow, head, B, female) {
+  const legR = parts.legR, legL = parts.legL;
+  const mesh = (parent, geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; parent.add(m); return m; };
+  const std = (hex, rough = 0.7, metal = 0) => new THREE.MeshStandardMaterial({ color: hex, roughness: rough, metalness: metal });
+  const leather = std(0x4a2e1c, 0.55), dark = std(0x1a1714, 0.8), brass = std(0xc9a14a, 0.35, 0.8);
+  const sh = B.sh || 1, tz = 0.70 * Math.sqrt(sh);
+  // open-front vest / jerkin over the torso, down from the shoulders to the waist
+  const vestShell = (mat, gap, key) => {
+    const v = mesh(chest, latheShell("vest" + key, [[0.160, -0.20], [0.168, -0.10], [0.195, 0.03], [0.222, 0.11], [0.222, 0.17], [0.19, 0.215]], gap, Math.PI * 2 - 2 * gap), mat, 0, 0.07, 0);
+    v.material.side = THREE.DoubleSide; v.scale.set(sh * 1.02, 1, tz * 1.07); return v;
+  };
+  // strap round the torso over one shoulder (bandolier)
+  const bandolier = (mat, bulletMat, n) => {
+    const r = new THREE.Group(); chest.add(r); r.position.set(0, 0.07, 0); r.rotation.z = 0.78;
+    const t = mesh(r, new THREE.TorusGeometry(0.235, 0.017, 6, 40), mat, 0, 0, 0); t.scale.set(1, 1, 1);
+    r.scale.set(sh, 1, tz * 1.12); t.rotation.x = Math.PI / 2;
+    // after r.rotation.z the strap runs shoulder -> opposite hip; bullets along its front arc
+    for (let i = 0; i < n; i++) {
+      const a = -0.55 + i * (1.1 / (n - 1));
+      const b = mesh(r, new THREE.CylinderGeometry(0.009, 0.009, 0.05, 6), bulletMat, Math.sin(a) * 0.235, 0, Math.cos(a) * 0.245);
+      b.rotation.z = Math.PI / 2 - 0.78 + 0.78;   // upright across the strap
+    }
+    return r;
+  };
+  const beltAt = (mat, y, buckleMat) => {
+    const bt = mesh(body, new THREE.TorusGeometry(0.162 * (B.hips || 1), 0.016, 6, 32), mat, 0, y, 0);
+    bt.rotation.x = Math.PI / 2; bt.scale.set(1, 0.80, 1);
+    if (buckleMat) mesh(body, new THREE.BoxGeometry(0.06, 0.045, 0.015), buckleMat, 0, y, 0.135);
+  };
+  const thighHolster = (leg, side, mat, gunMat) => {
+    const s = mesh(leg, new THREE.TorusGeometry(0.098 * (B.leg || 1), 0.008, 6, 20), mat, 0, -0.17, 0); s.rotation.x = Math.PI / 2;
+    mesh(leg, new THREE.BoxGeometry(0.035, 0.15, 0.085), mat, side * 0.10 * (B.leg || 1), -0.16, 0.0);
+    mesh(leg, new THREE.BoxGeometry(0.03, 0.06, 0.035), gunMat, side * 0.10 * (B.leg || 1), -0.065, 0.012);   // pistol grip sticking out
+  };
+  if (look === "gunslinger") {
+    vestShell(leather, 0.30, "gs");
+    bandolier(leather, brass, 11);
+    beltAt(leather, 0.02, brass);
+    thighHolster(legR, 1, leather, enemyShared.gun);
+    // neckerchief: a loose knot round the neck and a point hanging down the front
+    const scarf = std(0xe0662a, 0.8);
+    const k = mesh(chest, new THREE.TorusGeometry(0.068, 0.022, 8, 20), scarf, 0, 0.315, 0.004); k.rotation.x = Math.PI / 2 - 0.2;
+    const tip = mesh(chest, new THREE.ConeGeometry(0.05, 0.10, 4), scarf, 0, 0.255, 0.085); tip.rotation.x = Math.PI; tip.scale.z = 0.35;
+    // wide-brim hat, tipped forward a touch
+    const hat = new THREE.Group(); hat.position.set(0, 0.262, -0.012); hat.rotation.x = -0.10; head.add(hat);
+    const felt = std(0x3b2a1e, 0.85);
+    mesh(hat, new THREE.CylinderGeometry(0.215, 0.215, 0.012, 32), felt, 0, 0, 0).scale.z = 0.92;
+    const crown = mesh(hat, new THREE.CylinderGeometry(0.098, 0.116, 0.105, 24), felt, 0, 0.055, 0); crown.scale.z = 1.08;
+    mesh(hat, new THREE.CylinderGeometry(0.117, 0.117, 0.022, 24), dark, 0, 0.018, 0).scale.z = 1.08;
+    mesh(hat, new THREE.SphereGeometry(0.098, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), felt, 0, 0.105, 0).scale.set(1, 0.25, 1.08);
+    if (glow) { const gb = mesh(hat, new THREE.TorusGeometry(0.117, 0.004, 6, 32), glow, 0, 0.03, 0); gb.rotation.x = Math.PI / 2; gb.scale.set(1, 1.08, 1); }
+  } else if (look === "ranger") {
+    // black turtleneck (the top), green leather jerkin with strap-and-ring
+    // fastenings, a pauldron on one shoulder, a second gun slung on the back
+    const jerk = std(0x2e5a2a, 0.55);
+    vestShell(jerk, 0.10, "rg");
+    mesh(chest, new THREE.CylinderGeometry(0.066, 0.070, 0.09, 18), cloth, 0, 0.325, 0);                        // turtleneck collar
+    for (const y of [0.02, 0.15]) {
+      mesh(chest, new THREE.BoxGeometry(0.15, 0.022, 0.012), dark, 0, y + 0.07, 0.148 * tz / 0.70);
+      const ringM = mesh(chest, new THREE.TorusGeometry(0.018, 0.004, 6, 14), brass, 0, y + 0.07, 0.156 * tz / 0.70);
+    }
+    const pd = mesh(chest, new THREE.SphereGeometry(0.095, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.45), leather, -0.20 * sh, 0.27, 0);
+    pd.rotation.z = 0.55; pd.scale.set(1.05, 0.9, 1.0);
+    const sling = new THREE.Group(); sling.position.set(0, 0.06, -0.19 * tz / 0.70); sling.rotation.z = -0.75; chest.add(sling);
+    mesh(sling, new THREE.BoxGeometry(0.05, 0.62, 0.06), enemyShared.gun, 0, 0, 0);
+    mesh(sling, new THREE.CylinderGeometry(0.014, 0.014, 0.30, 8), enemyShared.gun, 0, 0.45, 0);
+    const strap = new THREE.Group(); chest.add(strap); strap.position.set(0, 0.07, 0); strap.rotation.z = -0.78; strap.scale.set(sh, 1, tz * 1.12);
+    const st = mesh(strap, new THREE.TorusGeometry(0.232, 0.010, 6, 40), dark, 0, 0, 0); st.rotation.x = Math.PI / 2;
+    beltAt(dark, 0.02, brass);
+  } else if (look === "vest") {
+    // combat vest + a shotgun-shell bandolier, cap on backwards
+    bandolier(dark, std(0xb02a2a, 0.5), 9);
+    const cap = new THREE.Group(); cap.position.set(0, 0.215, -0.02); head.add(cap);
+    const capM = std(0x5b3f8f, 0.7);
+    mesh(cap, new THREE.SphereGeometry(0.118, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), capM, 0, 0, 0).scale.set(1, 0.72, 1.06);
+    const bill = mesh(cap, new THREE.BoxGeometry(0.13, 0.010, 0.09), capM, 0, 0.004, -0.15); bill.rotation.x = -0.15;
+    if (glow) { const gb = mesh(cap, new THREE.TorusGeometry(0.118, 0.004, 6, 30), glow, 0, 0.004, 0); gb.rotation.x = Math.PI / 2; gb.scale.set(1, 1.06, 1); }
+  } else if (look === "tank") {
+    // Lara-style kit: thigh holster, small backpack
+    thighHolster(legR, 1, dark, enemyShared.gun);
+    beltAt(dark, 0.03, null);
+    const pack = mesh(chest, new THREE.BoxGeometry(0.18, 0.20, 0.08), leather, 0, 0.08, -0.13 * tz / 0.70 - 0.02);
+    for (const sx of [-1, 1]) { const s = mesh(chest, new THREE.BoxGeometry(0.022, 0.30, 0.012), leather, sx * 0.075, 0.13, 0.115 * tz / 0.70); s.rotation.z = sx * 0.05; }
   }
+}
+
+function dressSoldier(parts, body, cloth, vest, person, arms, pal = enemyShared) {
+  const O = OUTFITS[person.name];
+  if (!O) return;
+  const female = person.gender === "woman";
+  const legs = new Set();
+  for (const l of [parts.legL, parts.legR]) l.traverse(o => legs.add(o));
+  // top = the `cloth` material (the hit flash tints it), restyled in place
+  cloth.map = null; cloth.color.setHex(O.top);
+  cloth.roughness = O.rough ?? 0.82; cloth.metalness = O.metal ?? 0.02; cloth.side = THREE.DoubleSide;
+  vest.map = null; vest.color.setHex(O.collar); vest.roughness = O.look === "vest" ? 0.7 : cloth.roughness;
+  const pants = new THREE.MeshStandardMaterial({ color: O.pants, roughness: 0.85, bumpMap: cloth.bumpMap, bumpScale: 0.004 });
+  const skin = new THREE.MeshStandardMaterial({ color: person.skin, roughness: 0.58 });
+  const rimK = O.rimK ?? 1;                            // dark outfits take less, or the rim repaints them
+  addRim(cloth, O.glow, 2.6, 0.55 * rimK); addRim(vest, O.glow, 2.6, 0.55 * rimK); addRim(pants, O.glow, 3.0, 0.35 * rimK); addRim(skin, O.glow, 3.2, 0.25 * rimK);
+  const shoes = O.shoes ? new THREE.MeshStandardMaterial({ color: O.shoes, roughness: 0.6 }) : null;
+  const showKit = O.look === "vest" || !!O.kit;                 // a combat vest keeps the plate, pouches and straps
+  parts.g.traverse(m => {
+    if (!m.isMesh) return;
+    const inLeg = legs.has(m);
+    if (m.material === cloth && (inLeg || m.geometry.type === "CapsuleGeometry")) m.material = pants;          // thighs, shins, hips
+    else if (m.material === vest && !inLeg && (m.geometry.parameters?.radiusTop || 0) > 0.2) m.visible = showKit; // armour plate
+    else if (m.material === vest && !inLeg && (m.geometry.parameters?.radiusTop || 0) > 0.1) m.visible = false;   // old collar ring
+    else if (m.material === pal.strap && !inLeg) m.visible = showKit;                                     // belt, pouches, straps, pack, webbing
+    else if (shoes && inLeg && m.material === pal.boot) m.material = shoes;
+    if (inLeg && m.geometry.type === "BoxGeometry" && m.material === pal.strap) {   // sole: a rounded one, not a plate
+      m.geometry = faceOvalGeometry; m.scale.set(0.070, 0.020, 0.158); m.position.y += 0.006;
+    }
+  });
+  // ---- sculpted body --------------------------------------------------------
+  const chest = parts.upper;
+  const torso = chest.children.find(m => m.isMesh && m.material === cloth && m.geometry.type === "CylinderGeometry");
+  const Bq = BUILDS[person.name] || { sh: 1, leg: 1 };
+  if (torso) { torso.geometry = BODY.torso(female); torso.scale.set(Bq.sh, 1, 0.70 * Math.sqrt(Bq.sh)); }
+  parts.shoulderX = 0.205 * Bq.sh;
+  const hips = body.children.find(m => m.isMesh && m.material === pants && m.geometry.type === "CapsuleGeometry");
+  if (hips) { hips.geometry = BODY.pelvis(female); hips.scale.set(Bq.hips || 1, 1, 0.78 * (Bq.hips || 1)); }
+  const bare = { none: [true, true], short: [true, true], long: [false, false], rolled: [false, true] }[O.sleeves];
+  for (const sx of [-1, 1]) {                            // shoulder: fills the joint between torso and arm
+    const d = new THREE.Mesh(new THREE.SphereGeometry(0.068, 14, 10), O.sleeves === "none" ? skin : cloth);
+    d.position.set(sx * 0.196 * Bq.sh, 0.245, 0); d.scale.set(Bq.sh, 0.9 * Bq.sh, Bq.sh); d.castShadow = true; chest.add(d);
+  }
+  for (const leg of [parts.legL, parts.legR]) {
+    const thigh = leg.children.find(m => m.isMesh && m.geometry.type === "CapsuleGeometry");
+    const knee = leg.children.find(m => m.isMesh && m.geometry.type === "SphereGeometry");
+    const shin = leg.knee.children.find(m => m.isMesh && m.geometry.type === "CapsuleGeometry");
+    const legMat = O.legs === "long" ? pants : skin;
+    if (thigh) { thigh.geometry = BODY.thigh(female); thigh.position.set(0, 0, 0); thigh.material = legMat; thigh.scale.set(Bq.leg, 1, Bq.leg); }
+    if (knee) { knee.visible = true; knee.material = legMat; knee.scale.setScalar(0.74); knee.position.z = 0.004; }   // flush, not a mannequin ball
+    if (shin) { shin.geometry = BODY.shin(); shin.position.set(0, 0, -0.012); shin.material = legMat; shin.scale.set(Bq.leg, 1, Bq.leg); }
+    if (O.legs !== "long") {                             // shorts / cargo shorts over bare legs
+      const s = new THREE.Mesh(BODY.shorts(O.legs === "cargo"), pants); s.castShadow = true; s.scale.set(Bq.leg, 1, Bq.leg); leg.add(s);
+      if (O.legs === "cargo") { const pk = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.11, 0.10), pants); pk.position.set((leg === parts.legL ? -1 : 1) * 0.10, -0.20, 0); leg.add(pk); }
+    }
+  }
+  const B = BUILDS[person.name] || { h: female ? 0.94 : 1, sh: 1, arm: female ? 0.88 : 1, leg: 1 };
+  const handMat = ["vest", "leather", "gunslinger", "ranger"].includes(O.look) ? pal.boot : skin;     // gloves for the kit-wearers
+  for (const arm of arms) {                              // tapered bicep / forearm, filled elbow
+    arm.segments[0].geometry = B.muscle ? BODY.upperArmM() : BODY.upperArm();
+    arm.segments[1].geometry = B.muscle ? BODY.foreArmM() : BODY.foreArm();
+    arm.segments[0].material = bare[0] ? skin : cloth; arm.segments[1].material = bare[1] ? skin : cloth;
+    for (const sg of arm.segments) { sg.scale.x = sg.scale.z = B.arm; }
+    arm.glove.visible = false;
+    arm.hand = buildHand(handMat, arm.side, female ? 0.9 : B.muscle ? 1.1 : 1);
+    parts.g.add(arm.hand);
+    arm.elbowBall = new THREE.Mesh(new THREE.SphereGeometry((female ? 0.042 : 0.047) * B.arm * (O.sleeves === "rolled" ? 1.25 : 1), 10, 8), O.sleeves === "rolled" ? cloth : bare[1] ? skin : cloth);   // rolled: the cuff bunched at the elbow
+    parts.g.add(arm.elbowBall);
+    if (O.sleeves === "short") { arm.sleeve = new THREE.Mesh(BODY.sleeve(), cloth); arm.sleeveLen = 0.5; parts.g.add(arm.sleeve); }
+  }
+  // ---- per-look details -----------------------------------------------------
+  const glow = new THREE.MeshBasicMaterial({ color: O.glow, toneMapped: false });
+  const ring = (parent, r, y, z = 0, tube = 0.0065, sz = 0.72) => {
+    const t = new THREE.Mesh(new THREE.TorusGeometry(r, tube, 6, 32), glow);
+    t.rotation.x = Math.PI / 2; t.position.set(0, y, z); t.scale.set(1, sz, 1); parent.add(t); return t;
+  };
+  const add = (parent, geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; parent.add(m); return m; };
+  const collarR = female ? 0.062 : 0.068;
+  if (O.look === "coat") {
+    const tails = add(body, new THREE.CylinderGeometry(0.162, 0.31, 0.68, 22, 1, true, Math.PI * 0.5, Math.PI), cloth, 0, -0.24, -0.01);
+    tails.scale.z = 0.82;
+    add(chest, new THREE.CylinderGeometry(collarR + 0.022, collarR + 0.01, 0.10, 18, 1, true), vest, 0, 0.34, -0.005).scale.z = 0.9;
+    ring(chest, 0.158, -0.15);
+    const hem = new THREE.Mesh(new THREE.TorusGeometry(0.30, 0.006, 6, 32, Math.PI), glow);
+    hem.rotation.set(Math.PI / 2, 0, Math.PI); hem.position.set(0, -0.58, -0.01); hem.scale.set(1, 0.82, 1); body.add(hem);
+  } else if (O.look === "tank") {
+    ring(chest, 0.150, -0.15); ring(chest, 0.075, 0.325, 0.006, 0.005, 0.9);
+    for (const leg of [parts.legL, parts.legR]) { const r = ring(leg, 0.104, O.legs === "cargo" ? -0.35 : -0.23, 0, 0.005, 1); r.material = glow; }
+  } else if (O.look === "bomber") {
+    if (torso) { torso.scale.x *= 1.10; torso.scale.z *= 1.12; }
+    const rib = new THREE.MeshStandardMaterial({ color: 0x2a2620, roughness: 0.9 });
+    add(chest, new THREE.CylinderGeometry(0.168, 0.164, 0.06, 20), rib, 0, -0.15, 0).scale.z = 0.80;
+    add(chest, new THREE.CylinderGeometry(collarR + 0.012, collarR + 0.02, 0.06, 18), rib, 0, 0.325, 0).scale.z = 0.9;
+    ring(chest, collarR + 0.02, 0.355, 0, 0.005, 0.9);
+  } else if (O.look === "hoodie") {
+    const hood = add(chest, new THREE.SphereGeometry(0.15, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.55), cloth, 0, 0.29, -0.09);
+    hood.rotation.x = -Math.PI / 2 + 0.35; hood.scale.set(1.05, 0.95, 0.62);
+    const cord = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.6 });
+    for (const sx of [-1, 1]) add(chest, new THREE.CylinderGeometry(0.0045, 0.0045, 0.15, 6), cord, sx * 0.030, 0.21, 0.122);
+    add(chest, new THREE.BoxGeometry(0.19, 0.09, 0.02), cloth, 0, -0.08, 0.106);
+    ring(chest, 0.158, -0.15);
+  } else if (O.look === "leather") {
+    const tee = new THREE.MeshStandardMaterial({ color: 0xe8661c, roughness: 0.8 });
+    add(chest, new THREE.BoxGeometry(0.11, 0.30, 0.012), tee, 0, 0.06, 0.124);
+    for (const sx of [-1, 1]) { const e = add(chest, new THREE.BoxGeometry(0.006, 0.33, 0.006), glow, sx * 0.058, 0.06, 0.131); e.rotation.z = sx * 0.06; }
+    add(chest, new THREE.CylinderGeometry(collarR + 0.03, collarR + 0.02, 0.08, 18, 1, true), vest, 0, 0.33, 0).scale.z = 0.86;
+  } else if (O.look === "vest") {
+    // plate carrier over a light tee: the kit is shown (see showKit) in the vest colour
+    ring(chest, 0.176, 0.02, 0, 0.005, 0.80);
+  }
+  addGear(O.look, parts, body, chest, cloth, vest, skin, pants, glow, parts.headPivotRef, Bq, female);
+}
+
+// v3.58: who carries what. Each character owns a weapon, built to its own
+// shape (not one rifle stretched to three lengths), with its own grip points
+// for the hands, and a pistol held out at arm's length instead of shouldered.
+const WEAPON_OF = { Nia: "Pistol", Elena: "SMG", Mara: "Marksman", Jonas: "Carbine", Rafi: "LMG", Dev: "Shotgun" };
+function buildGun(parts, loadout) {
+  const rifle = parts.rifle, V = (x, y, z) => new THREE.Vector3(x, y, z);
+  const gun = enemyShared.gun;
+  const box = (w, h, d, x, y, z, mat = gun, rx = 0) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.rotation.x = rx; m.castShadow = true; rifle.add(m); return m; };
+  const tube = (r, len, x, y, z, mat = gun) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 10), mat); m.rotation.x = Math.PI / 2; m.position.set(x, y, z); m.castShadow = true; rifle.add(m); return m; };
+  const model = loadout.model;
+  // default grip points (carbine / marksman keep the stretched rifle)
+  let grip = { L: V(-0.004, -0.040, 0.34), R: V(0.004, -0.075, -0.10), pos: null };
+  if (model === "carbine" || model === "marksman") {
+    const g = box(0.030, 0.085, 0.036, 0, -0.075, -0.10 / loadout.length, gun, 0.3); g.scale.z = 1 / loadout.length;
+    grip.R.z = -0.10 / loadout.length;               // the rifle is stretched along z: keep the hand on its grip
+    return grip;
+  }
+  for (const c of [...rifle.children]) if (c !== parts.flash) rifle.remove(c);
+  rifle.scale.z = 1;
+  if (model === "pistol") {
+    box(0.030, 0.034, 0.190, 0, 0.022, 0.050);                    // slide
+    box(0.028, 0.030, 0.150, 0, -0.006, 0.040);                   // frame
+    box(0.027, 0.095, 0.042, 0, -0.058, -0.012, gun, 0.28);       // grip
+    parts.flash.position.set(0, 0.022, 0.16);
+    grip = { R: V(0.003, -0.058, -0.012), L: V(-0.012, -0.068, 0.002), pos: V(0.03, 1.33, 0.44) };
+  } else if (model === "smg") {
+    box(0.052, 0.085, 0.30, 0, 0, 0.04);                           // receiver
+    tube(0.015, 0.14, 0, 0.012, 0.25);                             // short barrel
+    box(0.034, 0.150, 0.048, 0, -0.105, 0.10, gun, -0.12);        // mag, forward
+    box(0.028, 0.080, 0.034, 0, -0.075, -0.07, gun, 0.3);         // grip
+    box(0.020, 0.030, 0.18, 0, 0.0, -0.18);                        // folded stock
+    parts.flash.position.set(0, 0.012, 0.33);
+    grip = { R: V(0.003, -0.078, -0.07), L: V(0.0, -0.10, 0.10), pos: V(0.04, 1.20, 0.20) };
+  } else if (model === "shotgun") {
+    const wood = new THREE.MeshStandardMaterial({ color: 0x5a3620, roughness: 0.6 });
+    box(0.050, 0.075, 0.26, 0, 0, 0.0);                            // receiver
+    tube(0.019, 0.60, 0, 0.018, 0.43);                             // barrel
+    tube(0.016, 0.46, 0, -0.018, 0.36);                            // magazine tube
+    box(0.050, 0.050, 0.15, 0, -0.018, 0.40, wood);               // pump
+    box(0.040, 0.085, 0.30, 0, -0.035, -0.26, wood, -0.12);       // stock
+    parts.flash.position.set(0, 0.018, 0.75);
+    grip = { R: V(0.004, -0.060, -0.10), L: V(-0.002, -0.052, 0.40), pos: null };
+  } else if (model === "lmg") {
+    box(0.075, 0.110, 0.46, 0, 0, 0.02);                           // receiver
+    tube(0.022, 0.50, 0, 0.012, 0.50);                             // heavy barrel
+    box(0.020, 0.030, 0.20, 0, 0.075, 0.02);                       // carry handle
+    box(0.020, 0.040, 0.02, 0, 0.055, -0.07); box(0.020, 0.040, 0.02, 0, 0.055, 0.11);
+    box(0.110, 0.120, 0.10, -0.06, -0.10, 0.04);                   // box magazine
+    box(0.050, 0.090, 0.26, 0, -0.02, -0.32, gun, -0.08);         // stock
+    box(0.030, 0.085, 0.036, 0, -0.085, -0.10, gun, 0.3);         // grip
+    parts.flash.position.set(0, 0.012, 0.77);
+    grip = { R: V(0.004, -0.085, -0.10), L: V(0.0, -0.070, 0.28), pos: V(0.05, 1.12, 0.14) };
+  }
+  return grip;
+}
+// hands that hold something: palm, fingers wrapped round the grip, a thumb —
+// built in the gun's frame (+z forward) and oriented with it every frame
+function buildHand(mat, side, scale = 1) {
+  const g = new THREE.Group();
+  const o = (x, y, z, sx, sy, sz) => { const m = new THREE.Mesh(faceOvalGeometry, mat); m.position.set(x, y, z); m.scale.set(sx, sy, sz); m.castShadow = true; g.add(m); return m; };
+  if (side > 0) {        // trigger hand round a vertical grip
+    o(0.020, 0.000, -0.004, 0.018, 0.040, 0.036);       // palm on the right of the grip
+    o(-0.002, -0.004, 0.026, 0.026, 0.036, 0.012);      // fingers across the front
+    o(-0.020, 0.000, 0.006, 0.010, 0.036, 0.024);       // fingertips on the left
+    o(-0.010, 0.036, 0.006, 0.010, 0.010, 0.026);       // thumb over the top
+  } else {               // support hand under the forend
+    o(0.000, -0.020, 0.000, 0.034, 0.014, 0.042);       // palm underneath
+    o(-0.030, 0.004, 0.004, 0.011, 0.028, 0.036);       // fingers up the left side
+    o(0.030, 0.000, -0.004, 0.009, 0.020, 0.024);       // thumb on the right
+  }
+  g.scale.setScalar(scale);
+  return g;
 }
 
 // hostile: per-enemy cloth/vest clones so the hit flash can tint just them
 function buildSoldier(operator = false) {
   const person = operator ? {name:'Operator',gender:'man',skin:0x8a6f58,hair:0x211a16,cloth:0x657789} : ENEMY_PEOPLE[enemyPersonIndex % ENEMY_PEOPLE.length];
-  const loadout = operator ? ENEMY_LOADOUTS[1] : ENEMY_LOADOUTS[Math.floor(enemyPersonIndex++ / 2) % ENEMY_LOADOUTS.length];
+  const loadout = operator ? ENEMY_LOADOUTS[1] : (enemyPersonIndex++, ENEMY_LOADOUTS.find(l => l.name === WEAPON_OF[person.name]) || ENEMY_LOADOUTS[1]);
   const palette = operator ? operatorShared : enemyShared;
   const cloth = palette.cloth.clone(); cloth.color.setHex(person.cloth);
   const vest = palette.vest.clone();
@@ -6438,6 +7025,7 @@ function buildSoldier(operator = false) {
   } else if(loadout.name === 'SMG') {
     const mag=new THREE.Mesh(new THREE.CylinderGeometry(0.075,0.075,0.075,12),enemyShared.gun);mag.position.set(0,-0.14,-0.03);mag.rotation.z=Math.PI/2;parts.rifle.add(mag);
   }
+  const grip = operator ? null : buildGun(parts, loadout);
   const headPivot = new THREE.Group();
   for (const child of [...parts.g.children]) {
     if (child === chest || child === parts.rifle || child.position.y < 1.05) continue;
@@ -6467,24 +7055,53 @@ function buildSoldier(operator = false) {
     body.add(child);
   }
   parts.g.add(body);
-  return { ...parts, body, headPivot, cloth, vest, arms, person, loadout };
+  parts.headPivotRef = headPivot;
+  dressSoldier(parts, body, cloth, vest, person, arms, palette);   // enemies and (v3.59) you
+  const build = BUILDS[person.name];
+  parts.g.scale.setScalar(build ? build.h : person.gender === 'woman' ? 0.94 : 1);   // each person their own height
+  return { ...parts, body, headPivot, cloth, vest, arms, person, loadout, grip, shoulderX: parts.shoulderX };
 }
 
+function limbPose(arm, shoulder, elbow, hand, handQuat) {
+  for (const [index, from, to] of [[0, shoulder, elbow], [1, elbow, hand]]) {
+    const mesh = arm.segments[index], delta = to.clone().sub(from);
+    mesh.position.copy(from).add(to).multiplyScalar(0.5); mesh.scale.y = delta.length();
+    mesh.quaternion.setFromUnitVectors(UP, delta.normalize());
+  }
+  arm.glove.position.copy(hand);
+  if (arm.elbowBall) arm.elbowBall.position.copy(elbow);
+  if (arm.hand) { arm.hand.position.copy(hand); if (handQuat) arm.hand.quaternion.copy(handQuat); }
+  if (arm.sleeve) {
+    const mid = shoulder.clone().lerp(elbow, arm.sleeveLen), d = mid.clone().sub(shoulder);
+    arm.sleeve.position.copy(shoulder).add(mid).multiplyScalar(0.5); arm.sleeve.scale.y = d.length();
+    arm.sleeve.quaternion.setFromUnitVectors(UP, d.normalize());
+  }
+}
 function poseCombatArms(e, chestYaw, aimPitch = 0) {
-    e.rifle.position.set(0.04, 1.16 - e.prone*0.18, 0.16 + e.prone*0.57 - e.recoil*0.025);
+    const G = e.grip, gp = G && G.pos;
+    e.rifle.position.set(gp ? gp.x : 0.04, (gp ? gp.y : 1.16) - e.prone*(gp && gp.y > 1.25 ? 0.33 : 0.18) + (e.leanOut || 0)*0.06,
+      (gp ? gp.z : 0.16) + (e.leanOut || 0)*0.30 + e.prone*(gp ? Math.max(0.2, 0.57 - (gp.z - 0.16)) : 0.57) - e.recoil*0.025);
     e.rifle.rotation.set(-e.recoil*0.04 - aimPitch, chestYaw, 0);
     e.g.updateMatrixWorld(true);
     for (const arm of e.arms) {
-      const shoulder=e.upper.localToWorld(new THREE.Vector3(arm.side*0.205,0.25,0));e.g.worldToLocal(shoulder);
-      const hand=e.rifle.localToWorld(new THREE.Vector3(arm.side<0?-0.035:0.055,arm.side<0?0.03:-0.07,arm.side<0?0.34:-0.08));e.g.worldToLocal(hand);
+      const shoulder=e.upper.localToWorld(new THREE.Vector3(arm.side*(e.shoulderX||0.205),0.25,0));e.g.worldToLocal(shoulder);
+      const hand=e.rifle.localToWorld(G ? (arm.side<0?G.L:G.R).clone() : new THREE.Vector3(arm.side<0?-0.035:0.055,arm.side<0?0.03:-0.07,arm.side<0?0.34:-0.08));e.g.worldToLocal(hand);
       const elbow=shoulder.clone().lerp(hand,0.48);
-      elbow.x+=arm.side*0.10;elbow.y-=0.13*(1-e.prone)+0.07*e.prone;
+      const reachOut = gp && gp.z > 0.3 ? 0.4 : 1;       // a pistol held out: arms nearly straight
+      elbow.x+=arm.side*0.10*reachOut;elbow.y-=(0.13*(1-e.prone)+0.07*e.prone)*reachOut;
       for(const [index,from,to] of [[0,shoulder,elbow],[1,elbow,hand]]) {
         const mesh=arm.segments[index], delta=to.clone().sub(from);
         mesh.position.copy(from).add(to).multiplyScalar(0.5);mesh.scale.y=delta.length();
         mesh.quaternion.setFromUnitVectors(UP,delta.normalize());
       }
       arm.glove.position.copy(hand);
+      if (arm.elbowBall) arm.elbowBall.position.copy(elbow);
+      if (arm.hand) { arm.hand.position.copy(hand); arm.hand.quaternion.copy(e.rifle.quaternion); }
+      if (arm.sleeve) {                                   // short sleeve: shoulder to mid upper arm
+        const mid = shoulder.clone().lerp(elbow, arm.sleeveLen), d = mid.clone().sub(shoulder);
+        arm.sleeve.position.copy(shoulder).add(mid).multiplyScalar(0.5); arm.sleeve.scale.y = d.length();
+        arm.sleeve.quaternion.setFromUnitVectors(UP, d.normalize());
+      }
     }
 }
 
@@ -6523,7 +7140,7 @@ const agent = buildOperator();
 agent.g.add(makeBlob());
 agent.gunMat = operatorShared.gun;      // so the third-person rifle glows too
 agent.g.visible = false;
-world.add(agent.g);
+scene.add(agent.g);    // v3.59: was world.add — the day map's group, hidden on every other map, so 3rd person showed no body there
 
 function spawnEnemy() {
   let x, z, tries = 0;
@@ -6703,6 +7320,12 @@ function playerShoot() {
   if (carHit) Pursuit.hitCar(carHit, dir);
   else if (best) {
     best.hp--; best.hitFlash = 0.12; best.flinch = 0.14;
+    // v3.59 stagger: jolt back, twist away from the shot, a step back, no firing for a moment
+    best.stagger = 0.45;
+    { const fy = best.g.rotation.y; best.staggerSide = Math.sign(dir.x * Math.cos(fy) - dir.z * Math.sin(fy)) || 1; }
+    best.vx = (best.vx || 0) + dir.x * 1.8; best.vz = (best.vz || 0) + dir.z * 1.8;
+    best.fireCd = Math.max(best.fireCd || 0, 0.7); best.burst = 0;
+    { const f = best.headPivot.userData.face; if (f) f.blink = 0; }
     hitMarker();
     Audio_.flesh();
     const wound = best.upper.localToWorld(new THREE.Vector3(0,0.1,0));
@@ -6727,12 +7350,26 @@ function killEnemy(e, ix, iz, label) {
   kills++;
   const d = Math.hypot(e.x - player.x, e.z - player.z);
   feedKill(label || ("Grunt · " + (d > 25 ? "Longshot" : d < 6 ? "Point Blank" : "Close")));
+  // v3.59: knees buckle, then the body goes down — away from the shot
+  // (backward) most of the time, forward onto the face now and then.
+  const fwd = Math.random() < 0.3;
   corpses.push({
     ...e, t: 0, life: 7, settled: false,
-    vx: ix * rand(2.4, 4.2), vz: iz * rand(2.4, 4.2),
-    vy: rand(2.6, 4.4), y: 0, rot: 0,
-    spin: rand(-11, 11) * (Math.random() < 0.5 ? 1 : -1),
+    vx: ix * rand(0.6, 1.1), vz: iz * rand(0.6, 1.1),
+    fall: fwd ? 1.48 : -1.50, roll: rand(-0.3, 0.3), y0: e.g.position.y,
+    legs0: [e.legL, e.legR].map(l => [l.rotation.x, l.knee.rotation.x]),
   });
+  faceClose(e.headPivot);
+  e.g.rotation.order = "YXZ";                        // fall about the body's own axis, after its facing
+  // arms let go of the gun and hang; the gun drops along the body's side
+  e.g.updateMatrixWorld(true);
+  const c0 = corpses[corpses.length - 1];
+  c0.limp = (e.arms || []).map(arm => {
+    const sh = e.upper.localToWorld(new THREE.Vector3(arm.side * (e.shoulderX || 0.205), 0.25, 0)); e.g.worldToLocal(sh);
+    const h0 = (arm.hand || arm.glove).position.clone(), el0 = arm.elbowBall ? arm.elbowBall.position.clone() : sh.clone().lerp(h0, 0.5);
+    return { arm, sh, el0, h0, el1: sh.clone().add(new THREE.Vector3(arm.side * 0.05, -0.27, 0.03)), h1: sh.clone().add(new THREE.Vector3(arm.side * 0.09, -0.53, 0.07)) };
+  });
+  c0.gun0 = { p: e.rifle.position.clone(), r: e.rifle.rotation.x };
   bloodAt(e.x, 1.0, e.z, 16);
   Audio_.kill();
   if (kills > 0 && kills % 5 === 0) {
@@ -6749,7 +7386,7 @@ function enemyFire(e, dist) {
   e.muzzle = 0.07;
   e.recoil = 1;
   e.flash.visible = true;
-  Audio_.enemyShot(dist);
+  Audio_.enemyShot(dist, e.loadout.model);
   const err = (0.10 + dist * 0.019) * e.loadout.spread;
   const lead = Pursuit.on ? dist / 46 : 0;           // PURSUIT: aim where the car will be
   const tx = player.x + Pursuit.state.vx * lead + rand(-err, err) * dist * 0.34;
@@ -6769,6 +7406,7 @@ function enemyFire(e, dist) {
 function hurt(n) {
   if (!player.alive) return;
   player.hp -= n;
+  player.sinceHit = 0;
   player.shake = Math.max(player.shake, 0.7);
   Audio_.hurt();
   const d = document.getElementById("damage");
@@ -6911,6 +7549,15 @@ function update(dt) {
   if (Pursuit.on) Pursuit.drive(dt);   // PURSUIT: you are the car; WASD drive it
   else {
   player.prone += ((player.crawling ? 1 : 0) - player.prone) * (1 - Math.exp(-6 * dt));
+  // v3.58: health comes back — 3.5 s without being hit, then +10/s. Breaking
+  // line of sight (cover, crawling) is now a real way to survive a fight.
+  player.sinceHit = (player.sinceHit || 0) + dt;
+  if (player.alive && player.sinceHit > 3.5 && player.hp < 100) {
+    player.hp = Math.min(100, player.hp + 10 * dt);
+    if (player.hp > 30) player.lowCalled = false;
+    player._regenHud = (player._regenHud || 0) + dt;
+    if (player._regenHud > 0.2) { player._regenHud = 0; updHud(); }
+  }
   const sprint = (keys.ShiftLeft || keys.ShiftRight) && !player.crawling && player.prone < 0.1;
   // ease into / out of the sights, and walk slower while they are up
   const wantAds = (aiming && player.alive && !sprint) ? 1 : 0;
@@ -7008,7 +7655,7 @@ function update(dt) {
         const remaining = Math.hypot(tx - e.x, tz - e.z);
         vx = tx - e.x; vz = tz - e.z;
         wantSpeed = Math.min(e.maxSp * (peeking ? 0.7 : 1.15), remaining * 4);
-        crouchTarget = peeking ? 0.08 : 0.42;
+        crouchTarget = peeking ? 0.08 : 0.36;   // behind cover: on one knee
         if (remaining < 0.18 && !['hide', 'peek'].includes(e.combatState)) {
           e.combatState = peeking ? 'peek' : 'hide';
           e.combatTimer = peeking ? rand(1.0, 1.8) : rand(0.9, 2.0);
@@ -7032,8 +7679,8 @@ function update(dt) {
         e.combatState = e.combatState === 'brace' ? 'advance' : 'brace';
         e.combatTimer = e.combatState === 'brace' ? rand(0.9, 1.7) : rand(2.0, 4.0);
       }
-      if (e.combatState === 'brace') { vx = vz = 0; wantSpeed = 0; crouchTarget = 0.28; }
-      else { crouchTarget = 0.12; wantSpeed *= 0.85; }
+      if (e.combatState === 'brace') { vx = vz = 0; wantSpeed = 0; crouchTarget = 0.36; }   // take a knee to shoot
+      else { crouchTarget = 0.02; wantSpeed *= 0.85; }   // moving low, not duck-walking (every cm of drop bends the knee a lot)
     }
     if (e.hitFlash > 0) { crouchTarget = Math.max(crouchTarget, 0.32); e.coverCheck = Math.min(e.coverCheck, 0.2); }
     e.crawlCooldown = (e.crawlCooldown ?? rand(3, 7)) - dt;
@@ -7045,12 +7692,16 @@ function update(dt) {
       } else e.crawlCooldown = 2;
     }
     if (dist < 5 || ['peek','peekMove'].includes(e.combatState) || !canStand(e.x,e.z,0.95) || hitsCar(e.x,e.z,0.95)) e.crawlTimer = 0;
-    const proneTarget = e.crawlTimer > 0 ? 1 : 0;
-    e.prone = (e.prone || 0) + (proneTarget - (e.prone || 0)) * (1 - Math.exp(-4 * dt));
+    // Down in stages, like a person: onto one knee first, then forward onto
+    // the hands and belly; getting up reverses it (belly -> knee -> feet).
+    const goingDown = e.crawlTimer > 0;
+    let proneTarget = goingDown ? 1 : 0;
+    if (goingDown && e.prone < 0.12 && (e.crouch || 0) < 0.32) proneTarget = e.prone || 0;   // not on the knee yet
+    e.prone = (e.prone || 0) + (proneTarget - (e.prone || 0)) * (1 - Math.exp(-2.8 * dt));
+    if (goingDown || e.prone > 0.06) crouchTarget = Math.max(crouchTarget, 0.36);
     if (e.prone > 0.1) {
       wantSpeed *= 1 - 0.72 * e.prone;
       if(e.combatState === 'brace') {vx=ux;vz=uz;wantSpeed=e.maxSp*0.22;}
-      crouchTarget *= 1-e.prone;
       // Allow enough travel time for a crawl to cover.
       if(e.cover && ['seek','return'].includes(e.combatState)) e.combatTimer += dt * 0.75;
     }
@@ -7115,13 +7766,14 @@ function update(dt) {
     const compression = bodySpring(motion, 'compression', Math.min(0.045, Math.hypot(sideAccel, forwardAccel) * 0.010), dt, 15);
     const hipX = -roll * 0.14 + Math.sin(e.gait) * 0.018 * walk;
     const hipZ = pitch * 0.12 - e.crouch * 0.30;
-    const settle = 0.012 * Math.cos(e.gait * 2) * walk - compression - e.crouch;
-    e.body.position.set(hipX, 0.90, hipZ);
-    e.body.rotation.set(pitch * 0.65 + e.prone * 1.37, Math.sin(e.gait) * 0.035 * walk, roll * 0.65);
-    e.g.position.set(e.x, (settle - 0.03) * (1-e.prone) - 0.67 * e.prone, e.z);
-    e.g.rotation.x = e.g.rotation.z = 0;
-    // Each foot spends 60% of its cycle on the ground, then clears the road.
-    // Solve hip and knee from the foot target, including sideways steps.
+    // v3.54 gait. The stance leg is nearly straight (LEG = hip-to-ankle with
+    // ~15 deg of knee), so the hip rides up over it and dips at double support
+    // — the rise-and-fall of a real walk — instead of the old permanent knee
+    // bend. Foot targets first, so the hip height can follow the planted foot.
+    const LEG = 0.852, RAISE = LEG - 0.79;
+    const kneel = clamp((e.crouch - 0.10) / 0.26, 0, 1) * (1 - walk);   // 0.36 = on one knee
+    const feet = [];
+    let stanceV = LEG;
     for (const [leg, offset] of [[e.legL, 0], [e.legR, Math.PI]]) {
       const phase = ((e.gait + offset) / (Math.PI * 2)) % 1;
       const swingT = clamp((phase - 0.60) / 0.40, 0, 1);
@@ -7129,12 +7781,38 @@ function update(dt) {
       const reach = phase < 0.60 ? 0.5 - phase / 0.60 : -0.5 + smooth;
       const length = stride * 0.60 * walk;
       const lift = Math.sin(Math.PI * swingT) ** 2 * 0.12 * walk;
+      let fx = reach * length * localX / dirLen - hipX;
+      let fz = reach * length * localZ / dirLen - hipZ;
+      // heel strike (toe up) at contact, heel rise (toe down) before push-off;
+      // the ankle lifts by what the rolling foot would otherwise dig in
+      const strike = phase < 0.60 ? Math.max(0, 1 - phase / 0.10) : 0;
+      const push = phase < 0.60 ? clamp((phase - 0.40) / 0.20, 0, 1) ** 2 : 0;
+      const roll2 = (-0.22 * strike + 0.32 * push) * walk;
+      const rollLift = (0.028 * strike + 0.05 * push) * walk;
+      if (phase < 0.60) stanceV = Math.min(stanceV, Math.sqrt(Math.max(0, LEG * LEG - fx * fx - fz * fz)));
+      // Kneel, never a two-footed squat: going low puts the lead foot forward
+      // (shin upright) and the rear knee on the road, toes tucked under.
+      let kLift = 0, kRoll = 0;
+      if (kneel > 0) {
+        const lead = (leg === e.legL) === (e.stance > 0);
+        fx += (-hipX + (lead ? -0.02 : 0.03) * (leg === e.legL ? 1 : -1) - fx) * kneel;
+        fz += ((lead ? 0.30 : -0.40) - hipZ - fz) * kneel;
+        if (!lead) { kLift = 0.05 * kneel; kRoll = 0.80 * kneel; }
+      }
+      feet.push({ leg, offset, swingT, fx, fz, lift: lift + rollLift + kLift, roll2: roll2 + kRoll });
+    }
+    e.hipBob = (e.hipBob || 0) + (((stanceV - LEG) * 0.65) - (e.hipBob || 0)) * (1 - Math.exp(-18 * dt));
+    const settle = e.hipBob - compression - e.crouch;
+    e.body.position.set(hipX, 0.90, hipZ);
+    e.body.rotation.set(pitch * 0.65 + e.prone * 1.37, Math.sin(e.gait) * 0.035 * walk, roll * 0.65);
+    e.g.position.set(e.x, (settle - 0.03 + RAISE) * (1-e.prone) - 0.67 * e.prone, e.z);
+    e.g.rotation.x = e.g.rotation.z = 0;
+    // Solve hip and knee from each foot target, including sideways steps.
+    for (const { leg, offset, swingT, fx, fz, lift, roll2 } of feet) {
       // Shift hips over the support foot while the foot target stays put.
       leg.position.x = (leg === e.legL ? -0.115 : 0.115) + hipX;
       leg.position.z = hipZ;
-      const fx = reach * length * localX / dirLen - hipX;
-      const fz = reach * length * localZ / dirLen - hipZ + (leg === e.legL ? 0.12 : -0.12) * e.crouch;
-      const fy = -0.79 - settle + lift;
+      const fy = -LEG - settle + lift;
       const upperLen = 0.50, lowerLen = 0.36;
       const d = clamp(Math.hypot(fx, fy, fz), 0.2, upperLen + lowerLen - 0.002);
       const knee = Math.PI - Math.acos(clamp((upperLen ** 2 + lowerLen ** 2 - d * d) / (2 * upperLen * lowerLen), -1, 1));
@@ -7142,7 +7820,7 @@ function update(dt) {
       leg.rotation.x = -Math.atan2(fz, Math.hypot(fx, fy))
         - Math.acos(clamp((upperLen ** 2 + d * d - lowerLen ** 2) / (2 * upperLen * d), -1, 1));
       leg.knee.rotation.x = knee;
-      leg.ankle.rotation.x = -leg.rotation.x - knee + Math.sin(swingT * Math.PI * 2) * 0.14 * walk;
+      leg.ankle.rotation.x = -leg.rotation.x - knee + Math.sin(swingT * Math.PI * 2) * 0.14 * walk + roll2;
       leg.ankle.rotation.z = -leg.rotation.z;
       // Belly crawl: alternating knee recovery behind a nearly horizontal torso.
       const crawlBeat = Math.sin(e.gait * 1.5 + offset);
@@ -7164,6 +7842,14 @@ function update(dt) {
     e.headPivot.rotation.y = clamp(chestYaw - e.upper.rotation.y - e.body.rotation.y, -0.45, 0.45) + (seen ? 0 : Math.sin(e.t * 0.7 + e.wanderSeed) * 0.13);
     e.headPivot.rotation.x = -(e.upper.rotation.x + e.body.rotation.x) * (0.75 + 0.2*e.prone);
     e.headPivot.rotation.z = -(e.upper.rotation.z + e.body.rotation.z) * 0.8;
+    faceTick(e.headPivot, dt, seen ? camera.position : null, 0);
+    if (e.stagger > 0) {
+      e.stagger -= dt;
+      const sg = Math.sin(clamp(e.stagger / 0.45, 0, 1) * Math.PI) * (1 - e.prone);
+      e.upper.rotation.x -= 0.45 * sg; e.upper.rotation.z += e.staggerSide * 0.35 * sg;
+      e.headPivot.rotation.x -= 0.35 * sg; e.headPivot.rotation.z += e.staggerSide * 0.30 * sg;
+      e.body.rotation.x -= 0.12 * sg;
+    }
 
     poseCombatArms(e, chestYaw);
 
@@ -7201,7 +7887,7 @@ function update(dt) {
       const miss = Math.hypot(ax + sx * u, ay + sy * u, az + sz * u);
       if (miss < (Pursuit.on ? 1.0 : 0.42 - 0.20 * player.prone)) {
         t.checked = true;
-        hurt(Pursuit.on ? rand(2.5, 5) : (t.damage || 10) * rand(0.85,1.15));   // the car soaks some of it
+        hurt(Pursuit.on ? rand(2.5, 5) : (t.damage || 10) * 0.45 * rand(0.85,1.15));   // the car soaks some of it; on foot, v3.58: under half
         tracers.splice(i, 1);
         continue;
       } else if (miss < 3.2 && !t.whizzed) {
@@ -7230,20 +7916,34 @@ function update(dt) {
   for (let i = corpses.length - 1; i >= 0; i--) {
     const c = corpses[i];
     c.t += dt;
-    if (!c.settled) {
-      c.vy -= 9.4 * dt;
-      c.x += c.vx * dt; c.z += c.vz * dt; c.y += c.vy * dt;
-      c.rot += c.spin * dt;
-      c.vx *= 0.985; c.vz *= 0.985;
-      if (c.y <= 0) {
-        c.y = 0; c.settled = true;
-        c.rot = Math.PI / 2 * (c.spin > 0 ? 1 : -1);
-        Audio_.flesh();
+    if (c.fall !== undefined) {
+      // knees go (0-0.35 s), then the body topples to the ground (0.2-0.85 s)
+      const k1 = Math.min(1, c.t / 0.35), b = k1 * k1 * (3 - 2 * k1);
+      const k2r = clamp((c.t - 0.20) / 0.65, 0, 1), k2 = k2r * k2r;
+      if (c.t < 0.5) { c.x += c.vx * dt; c.z += c.vz * dt; c.vx *= 0.9; c.vz *= 0.9;
+        if (hitsAny(c.x, c.z, colliders, 0.3)) { c.x -= c.vx * dt; c.z -= c.vz * dt; c.vx = c.vz = 0; } }
+      c.legs0.forEach(([hx, kx], i) => {
+        const leg = i ? c.legR : c.legL;
+        const bx = -0.55 - i * 0.2, bk = 1.25 + i * 0.25;          // buckled
+        leg.rotation.x = hx + (bx - hx) * b + (0.05 - bx) * k2;     // ... and loose again once down
+        leg.knee.rotation.x = kx + (bk - kx) * b + (0.35 - bk) * k2;
+      });
+      c.upper.rotation.x += ((c.fall > 0 ? 0.3 : -0.4) - c.upper.rotation.x) * Math.min(1, dt * 6);
+      c.headPivot.rotation.x += ((c.fall > 0 ? 0.2 : -0.5) - c.headPivot.rotation.x) * Math.min(1, dt * 5);
+      c.headPivot.rotation.z += (c.roll * 1.6 - c.headPivot.rotation.z) * Math.min(1, dt * 4);
+      if (c.limp && c.t < 0.6) {
+        const k = Math.min(1, c.t / 0.45), m = k * k * (3 - 2 * k);
+        for (const L of c.limp) limbPose(L.arm, L.sh, L.el0.clone().lerp(L.el1, m), L.h0.clone().lerp(L.h1, m), null);
+        c.rifle.position.lerpVectors(c.gun0.p, new THREE.Vector3(0.33, 0.55, 0.06), m);
+        c.rifle.rotation.x = c.gun0.r + (Math.PI / 2 - c.gun0.r) * m;
       }
-      if (hitsAny(c.x, c.z, colliders, 0.3)) { c.x -= c.vx * dt; c.z -= c.vz * dt; c.vx = c.vz = 0; }
+      c.y = (c.y0 - 0.30 * b) * (1 - k2) + 0.14 * k2;
+      c.g.position.set(c.x, c.y, c.z);
+      c.g.rotation.set(c.fall * k2, c.g.rotation.y, c.roll * k2);
+      if (!c.settled && k2r >= 1) { c.settled = true; Audio_.flesh(); }
+    } else {
+      c.g.position.set(c.x, c.y || 0, c.z);
     }
-    c.g.position.set(c.x, c.y, c.z);
-    c.g.rotation.set(c.settled ? c.rot : c.rot * 0.6, c.g.rotation.y, c.settled ? 0 : c.rot * 0.3);
     if (c.t > c.life) { scene.remove(c.g); corpses.splice(i, 1); }
   }
 
@@ -7409,7 +8109,7 @@ const Comms = (() => {
   return { init, request };
 })();
 
-// --------------------------------------------------------- PURSUIT (v3.52)
+// --------------------------------------------------------- PURSUIT (v3.53)
 // A CYBERPUNK variant built from the user's reference frame (~/car.png): YOU
 // sit in your own car (first person, rifle in hand, the car itself not drawn)
 // and the black supercar from that shot drives ahead of you like traffic —
@@ -7831,19 +8531,17 @@ const Pursuit = (() => {
     const glow = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 8), new THREE.MeshBasicMaterial({
       map: poolTex, color: 0x6a6258, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false }));
     glow.rotation.x = -Math.PI / 2; glow.position.set(0, -0.02, -7); g.add(glow);
-    // the shooter sits INSIDE behind the dark glass; all you see is his rifle out of the window
-    const gun = new THREE.Group();
-    const barrel = new THREE.Mesh(boxG, operatorShared.gun);
-    barrel.scale.set(0.07, 0.08, 0.75); barrel.position.z = -0.30;
-    const flash = new THREE.Sprite(flashSprite.material.clone());
-    flash.position.z = -0.72; flash.scale.setScalar(0.8); flash.visible = false;
-    gun.add(barrel, flash);
-    g.add(gun);
+    const shooter = buildSoldier();
+    shooter.prone = 0; shooter.recoil = 0;
+    shooter.legL.visible = shooter.legR.visible = false;
+    for(const child of shooter.g.children) if(child.geometry?.type === 'CircleGeometry') child.visible = false;
+    g.add(shooter.g);
+    const gun = shooter.rifle, flash = shooter.flash;
     const winY = kind === "super" ? 0.98 : 1.08;
     const hull = g.children[0];
     scene.add(g);
     const x = clamp(S.x + rand(-7, 7), -9.5, 9.5);
-    const c = { g, gun, flash, winY, hull, kind, x, z, h: s > 0 ? Math.PI : 0, v: Math.max(8, Math.abs(S.vLong) + (behind ? 9 : -6)),
+    const c = { g, gun, flash, shooter, lean: 0, windowSide: 1, duckT: 0, winY, hull, kind, x, z, h: s > 0 ? Math.PI : 0, v: Math.max(8, Math.abs(S.vLong) + (behind ? 9 : -6)),
                 hp: 10, side: (Math.random() < 0.5 ? -1 : 1) * rand(3.8, 5.5), dzBase: rand(-6, 9), seed: rand(0, 6.28),
                 fireCd: rand(1.2, 2.4), burst: 0, burstCd: 0, ramIn: rand(5, 9), ramT: 0, crashCd: 0,
                 hitFlash: 0, muzzle: 0, t: 0, vx: 0, vz: 0 };
@@ -7868,8 +8566,11 @@ const Pursuit = (() => {
   }
 
   function carFire(c, dist) {
-    c.muzzle = 0.07; c.flash.visible = true;
-    Audio_.enemyShot(dist);
+    if(c.lean < 0.75 || c.duckT > 0) return;
+    c.g.updateMatrixWorld(true); c.flash.getWorldPosition(_m);
+    if(!los(_m.x,_m.z,S.x,S.z,_m.y,SEAT_Y)) return;
+    c.muzzle = 0.07; c.flash.visible = true; c.shooter.recoil = 1;
+    Audio_.enemyShot(dist, c.shooter.loadout.model);
     const fl = dist / 46;
     // a moving gun platform: even point-blank only ~1 round in 4 finds the car.
     // The miss goes SIDEWAYS to the line of fire — an offset along it misses nothing.
@@ -7877,7 +8578,7 @@ const Pursuit = (() => {
     const ox = _m.x, oy = _m.y, oz = _m.z;
     const px0 = S.x + (S.vx - c.vx) * fl, pz0 = S.z + (S.vz - c.vz) * fl;
     const lx = pz0 - oz, lz = -(px0 - ox), ll = Math.hypot(lx, lz) || 1;
-    const em = (Math.random() < 0.5 ? -1 : 1) * Math.pow(Math.random(), 0.7) * Math.max(2.4, dist * 0.18);
+    const em = (Math.random() < 0.5 ? -1 : 1) * Math.pow(Math.random(), 0.7) * Math.max(2.4, dist * 0.18) * c.shooter.loadout.spread;
     const tx = px0 + lx / ll * em, tz = pz0 + lz / ll * em;
     const ty = 1.3 + rand(-0.7, 0.9);
     const dx = tx - ox, dy = ty - oy, dz = tz - oz, len = Math.hypot(dx, dy, dz) || 1;
@@ -7965,21 +8666,42 @@ const Pursuit = (() => {
       c.muzzle = Math.max(0, c.muzzle - dt);
       if (c.muzzle <= 0) c.flash.visible = false;
       const dx = S.x - c.x, dz = S.z - c.z, dist = Math.hypot(dx, dz) || 1;
-      // rifle out of whichever side window faces you, swung onto you
-      const sideX = dx * Math.cos(c.h) - dz * Math.sin(c.h) >= 0 ? 1 : -1;
-      c.gun.position.set(sideX * (c.kind === "super" ? 0.80 : 0.82), c.winY, -0.1);
-      c.gun.rotation.set(0, Math.atan2(-dx, -dz) - c.h, 0);
-      // ---- fire
-      const gy = 0.06 + c.winY;
-      if (player.alive && dist < 55 && los(c.x, c.z, S.x, S.z, gy, 1.4)) {
-        if (c.burst > 0) {
-          c.burstCd -= dt;
-          if (c.burstCd <= 0) { carFire(c, dist); c.burst--; c.burstCd = 0.1; }
+      const desiredSide = dx * Math.cos(c.h) - dz * Math.sin(c.h) >= 0 ? 1 : -1;
+      c.duckT = Math.max(0,c.duckT-dt);
+      const visible = player.alive && dist < 55 && los(c.x,c.z,S.x,S.z,c.winY+0.35,SEAT_Y);
+      // Pull inside before changing windows; expose the face before firing.
+      if(desiredSide !== c.windowSide && c.lean < 0.06) c.windowSide=desiredSide;
+      const ready = visible && c.duckT <= 0 && desiredSide === c.windowSide;
+      const leanTarget = ready && (c.burst > 0 || c.fireCd < 0.85) ? 1 : 0;
+      c.lean += (leanTarget-c.lean)*(1-Math.exp(-7*dt));
+      const actor=c.shooter;
+      actor.g.position.set(c.windowSide*(0.40+0.18*c.lean),c.winY-1.50+0.40*c.lean,-0.12);
+      actor.g.rotation.y=wrapA(Math.atan2(dx,dz)-c.h);
+      actor.leanOut=c.lean;
+      actor.body.rotation.x=0.70*c.lean*c.windowSide*Math.sin(actor.g.rotation.y);
+      actor.body.rotation.z=-0.70*c.lean*c.windowSide*Math.cos(actor.g.rotation.y);
+      actor.upper.rotation.set(-0.06*c.lean,Math.sin(c.t*1.6)*0.015,Math.sin(c.t*2)*0.018*c.lean);
+      actor.headPivot.rotation.x=-actor.body.rotation.x*0.8;
+      actor.headPivot.rotation.z=-actor.body.rotation.z*0.8;
+      faceTick(actor.headPivot,dt,camera.position,c.lean*clamp(Math.abs(c.v)/28,0,1));
+      actor.recoil=Math.max(0,actor.recoil-dt*7);
+      poseCombatArms(actor,0);
+      actor.cloth.emissive.setHex(c.hitFlash>0?0x651208:0);
+      // A short exposed burst followed by a deliberate duck behind the door.
+      if(visible) {
+        if(c.burst>0) {
+          c.burstCd-=dt;
+          if(c.burstCd<=0 && c.lean>0.85 && ready) {
+            carFire(c,dist);c.burst--;c.burstCd=actor.loadout.interval;
+          }
         } else {
-          c.fireCd -= dt;
-          if (c.fireCd <= 0) { c.burst = 3 + ((Math.random() * 2) | 0); c.burstCd = 0; c.fireCd = rand(1.5, 3.2); }
+          c.fireCd-=dt;
+          if(c.fireCd<=0 && ready) {
+            c.burst=actor.loadout.burst;c.burstCd=0;
+            c.fireCd=actor.loadout.cooldown*rand(0.9,1.2);
+          }
         }
-      }
+      } else { c.burst=0;c.fireCd=Math.max(c.fireCd,0.9); }
       // fell hopelessly behind or overshot: he comes round again from behind
       const rel = (c.z - S.z) * dirSign();
       if (rel < -85 || rel > 110) { c.z = S.z - dirSign() * rand(40, 50); c.x = clamp(S.x + rand(-6, 6), -9.5, 9.5); c.v = Math.abs(sp) + 8; }
@@ -8004,7 +8726,20 @@ const Pursuit = (() => {
         if (u > w) { const s = u; u = w; w = s; }
         t0 = Math.max(t0, u); t1 = Math.min(t1, w);
       }
-      if (t0 <= t1 && t0 < maxT) { maxT = t0; hit = { c, t: t0, gunner: oy + d.y * t0 > c.winY - 0.12 }; }   // through the glass: the shooter
+      if (t0 <= t1 && t0 < maxT) { maxT = t0; hit = { c, t: t0, gunner: false }; }   // through the glass: the shooter
+      // Actual exposed head/torso regions, depth-tested against the car hull.
+      if(c.lean>0.25) {
+        c.g.updateMatrixWorld(true);
+        for(const [part,point,radius] of [[c.shooter.headPivot,new THREE.Vector3(0,0.15,0),0.17],[c.shooter.upper,new THREE.Vector3(0,0.12,0),0.25]]) {
+          const center=part.localToWorld(point);
+          const vx=center.x-ox,vy=center.y-oy,vz=center.z-oz;
+          const along=vx*d.x+vy*d.y+vz*d.z;
+          const miss2=vx*vx+vy*vy+vz*vz-along*along;
+          if(miss2>radius*radius)continue;
+          const t=along-Math.sqrt(Math.max(0,radius*radius-miss2));
+          if(t>0 && t<maxT){maxT=t;hit={c,t,gunner:true};}
+        }
+      }
     }
     // the lead car is not a target, but it is solid
     const L = S.lead;
@@ -8029,6 +8764,7 @@ const Pursuit = (() => {
     const c = h.c;
     c.hp -= h.gunner ? 3 : 1;
     c.hitFlash = 0.08;
+    c.duckT = h.gunner ? 0.9 : 0.45; c.burst = 0; c.fireCd = Math.max(c.fireCd,1.1);
     hitMarker();
     if (h.gunner) { Audio_.flesh(); scrape(px, py, pz, 8); }
     else { Audio_.click(); scrape(px, py, pz, 6); }
@@ -8502,7 +9238,7 @@ try {                             // operative's last pick survives reloads
 } catch (e) {}
 setEnvironment(bootEnv);          // L cycles day -> cyberpunk -> hunted
 Comms.init();
-toast("STREET/AGENT v3.52 · " + ENV[envName].label);
+toast("STREET/AGENT v3.59 · " + ENV[envName].label);
 requestAnimationFrame(frame);
 
 // ?play=1 skips the menu (useful for kiosks, screenshots and testing).
@@ -8567,7 +9303,7 @@ window.__sa = {
   setAiming: v => { aiming = !!v; }, getAds: () => player.ads,
   agent, getThirdPerson: () => thirdPerson, setThirdPerson: v => { thirdPerson = !!v; updateBadge(); },
   setEnvironment, ENV, ENV_ORDER, getEnv: () => envName, getMap: () => curMap, Pursuit, keys,
-  inStreet, canStand, los, losBlockers, worldCars, hitsCar, player, MAPS, spawnEnemy, getMode: () => mode, getStuck: () => stuckT, getIsDay: () => envName === "day", enemies, buildSoldier, feedKill,
+  inStreet, canStand, los, losBlockers, worldCars, hitsCar, player, MAPS, spawnEnemy, getMode: () => mode, getStuck: () => stuckT, getIsDay: () => envName === "day", enemies, buildSoldier, poseCombatArms, playerShoot, feedKill,
   getMode: () => mode, setMode: m => { mode = m; },
   // Freeze a repeatable viewpoint — handy for comparing tiers or grabbing a
   // clean frame: __sa.setMode("pause"); __sa.setView(0, 6, Math.PI);
