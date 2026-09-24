@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>STREET / AGENT v3.51</title>
+<title>STREET / AGENT v3.52</title>
 <style>
   :root {
     --amber: #ffb347;
@@ -224,7 +224,7 @@
   <div class="box">
     <h1>STREET <span>/</span> AGENT</h1>
     <div class="sub" id="ovsub">Sector 7 · night watch</div>
-    <div class="verline">v3.51 — women with long hair & ponytails · PURSUIT: N = restart · K lights · F reflections · VERTICAL 9:16 (O)</div>
+    <div class="verline">v3.52 — C to crawl / stand · PURSUIT: N = restart · K lights · F reflections · VERTICAL 9:16 (O)</div>
     <div class="profiles">
       <button id="profDay" class="pbtn" type="button">DAY</button>
       <button id="profCyber" class="pbtn" type="button">CYBERPUNK</button>
@@ -240,6 +240,7 @@
       <b>CLICK</b><span>fire (hold for auto)</span>
       <b>RIGHT MOUSE</b><span>aim down sights</span>
       <b>SHIFT</b><span>sprint</span>
+      <b>C</b><span>crawl / stand (toggle)</span>
       <b>R</b><span>reload</span>
       <b>ESC</b><span>release cursor</span>
       <b>G</b><span>render quality (ULTRA → LOW)</span>
@@ -301,8 +302,8 @@ try { if (!location.search.includes("vertical=")) vertical = localStorage.getIte
 const viewH = () => innerHeight;
 const viewW = () => vertical ? Math.min(innerWidth, Math.round(innerHeight * 9 / 16)) : innerWidth;
 const baseFov = () => vertical ? 72 : 55;   // a tall frame needs more vertical FOV to stay playable
-let reflectionsOn = true;   // F: mirror reflections (the big cost)
-try { reflectionsOn = localStorage.getItem("sa.reflections") !== "off"; } catch (e) {}
+let reflectionsOn = false;  // F: mirror reflections (the big cost) — shared build: off by default
+try { reflectionsOn = localStorage.getItem("sa.reflections") === "on"; } catch (e) {}
 document.body.classList.toggle("vertical", vertical);
 const QUALITY = [
   { label: "ULTRA", dpr: DPR_CAP,                 samples: 4, bloom: true,  shadows: 4096, detail: 1.00, rain: 1100, lights: 0 },
@@ -476,7 +477,7 @@ function setMSAASamples(n) {
 function updateBadge() {
   const el = document.getElementById("ver");
   const MAPTAG = { street: "SECTOR 7", arena: "OVERRUN YARD", neon: "SUNSET VIADUCT" };
-  if (el) el.innerHTML = 'STREET/AGENT <b>v3.51</b> · ' + (envName === "pursuit" ? "IN THE CAR" : (thirdPerson ? "3RD" : "1ST") + " PERSON") + " · "
+  if (el) el.innerHTML = 'STREET/AGENT <b>v3.52</b> · ' + (envName === "pursuit" ? "IN THE CAR" : (thirdPerson ? "3RD" : "1ST") + " PERSON" + (player.crawling ? " · CRAWLING" : "")) + " · "
     + ENV[envName].label + " · " + (MAPTAG[curMap] || curMap.toUpperCase());
 }
 
@@ -496,8 +497,8 @@ function hudQuality(q) {
 var lightBudget = 0, lightPool = [], pooledWorld = null, _lpScore = [];
 // K cycles it by hand: AUTO (the tier's value) -> 4 -> 8 -> 12 -> 16 -> ALL
 const LIGHT_STEPS = [null, 4, 8, 12, 16, 0];
-var lightChoice = null;
-try { const v = localStorage.getItem("sa.lights"); if (v !== null && v !== "auto") lightChoice = +v; } catch (e) {}
+var lightChoice = 12;   // shared build: nearest-12 by default
+try { const v = localStorage.getItem("sa.lights"); if (v !== null) lightChoice = v === "auto" ? null : +v; } catch (e) {}
 const lightWant = q => lightChoice ?? (q.lights || 0);
 const lightLabel = () => { const n = lightWant(QUALITY[quality]); return (n ? n + " lights" : "all lights") + (lightChoice === null ? " (auto)" : ""); };
 const _lpV = new THREE.Vector3();
@@ -1546,7 +1547,7 @@ const ENV = {
             envInt: 0.80, tube: [0.35, 0.55, 0.75], roadInt: 1.9, puddleInt: 2.4, blobs: 0.25,
             vig: 0.42, grain: 0.008 },
 };
-// PURSUIT: the CYBERPUNK viaduct and grade, played from the car (v3.51) —
+// PURSUIT: the CYBERPUNK viaduct and grade, played from the car (v3.52) —
 // see the Pursuit module; `drive` is what switches the controls.
 ENV.pursuit = { ...ENV.cyber, label: "PURSUIT", drive: true };
 const ENV_ORDER = ["day", "cyber", "pursuit", "kabuki", "hunted"];
@@ -5767,6 +5768,7 @@ const player = {
   hp: 100, ammo: MAG, reloading: 0, cool: 0,
   bob: 0, kick: 0, shake: 0, alive: true, lowCalled: false,
   ads: 0,                       // 0 = hip carry, 1 = sights up on the eye
+  crawling: false, prone: 0,
   heat: 0,                      // barrel temperature 0..1, glows + shimmers
 };
 let mode = "menu";                     // menu | play | pause | dead
@@ -6413,12 +6415,13 @@ function soldierFace(pivot, person) {
 }
 
 // hostile: per-enemy cloth/vest clones so the hit flash can tint just them
-function buildSoldier() {
-  const person = ENEMY_PEOPLE[enemyPersonIndex % ENEMY_PEOPLE.length];
-  const loadout = ENEMY_LOADOUTS[Math.floor(enemyPersonIndex++ / 2) % ENEMY_LOADOUTS.length];
-  const cloth = enemyShared.cloth.clone(); cloth.color.setHex(person.cloth);
-  const vest = enemyShared.vest.clone();
-  const parts = buildTrooper({ ...enemyShared, cloth, vest }, { flashScale: 0.55 });
+function buildSoldier(operator = false) {
+  const person = operator ? {name:'Operator',gender:'man',skin:0x8a6f58,hair:0x211a16,cloth:0x657789} : ENEMY_PEOPLE[enemyPersonIndex % ENEMY_PEOPLE.length];
+  const loadout = operator ? ENEMY_LOADOUTS[1] : ENEMY_LOADOUTS[Math.floor(enemyPersonIndex++ / 2) % ENEMY_LOADOUTS.length];
+  const palette = operator ? operatorShared : enemyShared;
+  const cloth = palette.cloth.clone(); cloth.color.setHex(person.cloth);
+  const vest = palette.vest.clone();
+  const parts = buildTrooper({ ...palette, cloth, vest }, { flashScale: 0.55 });
   // Give the chest and head real pivots; the operator keeps its existing rig.
   const chest = parts.upper;
   // Rebuild the arms as articulated segments, so prone hands can reach the gun.
@@ -6467,6 +6470,24 @@ function buildSoldier() {
   return { ...parts, body, headPivot, cloth, vest, arms, person, loadout };
 }
 
+function poseCombatArms(e, chestYaw, aimPitch = 0) {
+    e.rifle.position.set(0.04, 1.16 - e.prone*0.18, 0.16 + e.prone*0.57 - e.recoil*0.025);
+    e.rifle.rotation.set(-e.recoil*0.04 - aimPitch, chestYaw, 0);
+    e.g.updateMatrixWorld(true);
+    for (const arm of e.arms) {
+      const shoulder=e.upper.localToWorld(new THREE.Vector3(arm.side*0.205,0.25,0));e.g.worldToLocal(shoulder);
+      const hand=e.rifle.localToWorld(new THREE.Vector3(arm.side<0?-0.035:0.055,arm.side<0?0.03:-0.07,arm.side<0?0.34:-0.08));e.g.worldToLocal(hand);
+      const elbow=shoulder.clone().lerp(hand,0.48);
+      elbow.x+=arm.side*0.10;elbow.y-=0.13*(1-e.prone)+0.07*e.prone;
+      for(const [index,from,to] of [[0,shoulder,elbow],[1,elbow,hand]]) {
+        const mesh=arm.segments[index], delta=to.clone().sub(from);
+        mesh.position.copy(from).add(to).multiplyScalar(0.5);mesh.scale.y=delta.length();
+        mesh.quaternion.setFromUnitVectors(UP,delta.normalize());
+      }
+      arm.glove.position.copy(hand);
+    }
+}
+
 // Exact damped spring response: stable across frame rates, with a small
 // overshoot as body mass catches up to a new balance point.
 function bodySpring(state, key, target, dt, frequency = 12, damping = 0.78) {
@@ -6496,10 +6517,7 @@ const operatorShared = {
   glass: new THREE.MeshStandardMaterial({ color: 0x1a2740, roughness: 0.10, metalness: 0.55 }),
 };
 function buildOperator() {
-  return buildTrooper(operatorShared, {
-    flashScale: 0.6,
-    visorMat: new THREE.MeshBasicMaterial({ color: new THREE.Color(0.35, 0.85, 1.0), toneMapped: false }),
-  });
+  return buildSoldier(true);
 }
 const agent = buildOperator();
 agent.g.add(makeBlob());
@@ -6727,7 +6745,7 @@ const enemyMuzzle = new THREE.Vector3();
 function enemyFire(e, dist) {
   e.g.updateMatrixWorld(true);
   e.flash.getWorldPosition(enemyMuzzle);
-  if (!los(enemyMuzzle.x, enemyMuzzle.z, player.x, player.z, enemyMuzzle.y, EYE)) return;
+  if (!los(enemyMuzzle.x, enemyMuzzle.z, player.x, player.z, enemyMuzzle.y, playerEyeHeight())) return;
   e.muzzle = 0.07;
   e.recoil = 1;
   e.flash.visible = true;
@@ -6736,7 +6754,7 @@ function enemyFire(e, dist) {
   const lead = Pursuit.on ? dist / 46 : 0;           // PURSUIT: aim where the car will be
   const tx = player.x + Pursuit.state.vx * lead + rand(-err, err) * dist * 0.34;
   const tz = player.z + Pursuit.state.vz * lead + rand(-err, err) * dist * 0.34;
-  const ty = EYE + rand(-0.34, 0.42);
+  const ty = playerEyeHeight() + rand(-0.34, 0.42);
   const dx = tx - enemyMuzzle.x, dy = ty - enemyMuzzle.y, dz = tz - enemyMuzzle.z;
   const len = Math.hypot(dx, dy, dz) || 1;
   const sp = 46;
@@ -6797,7 +6815,7 @@ function resetWorldState() {
   Object.assign(player, {          // hard-coding (0,6) respawned operatives
     x: RS[0], z: RS[1], yaw: Math.PI, pitch: 0,   // outside the Neon Mile and
     hp: 100, ammo: MAG, reloading: 0, cool: 0, kick: 0, shake: 0,   // froze them
-    alive: true, lowCalled: false, ads: 0,
+    alive: true, lowCalled: false, ads: 0, crawling: false, prone: 0,
   });
   wave = 0; kills = 0; spawnQueue = 0; waveClearTimer = 0;
   Pursuit.reset();
@@ -6847,14 +6865,14 @@ function findCombatCover(e) {
       const a = away + i * Math.PI / 8;
       const x = e.x + Math.sin(a) * radius, z = e.z + Math.cos(a) * radius;
       if (!canStand(x, z, 0.36) || hitsCar(x, z, 0.36)) continue;
-      if (los(player.x, player.z, x, z, EYE, 1.24)) continue;
+      if (los(player.x, player.z, x, z, playerEyeHeight(), 1.24)) continue;
       if (enemies.some(other => other !== e && other.cover && Math.hypot(other.cover.x - x, other.cover.z - z) < 1.5)) continue;
       if (!combatRoute(e.x, e.z, x, z)) continue;
       // Require a nearby firing position as well as protection.
       for (const reach of [1.2, 2.2]) for (let j = 0; j < 8; j++) {
         const b = a + j * Math.PI / 4;
         const px = x + Math.sin(b) * reach, pz = z + Math.cos(b) * reach;
-        if (!combatRoute(x, z, px, pz) || !los(px, pz, player.x, player.z, 1.3, EYE)) continue;
+        if (!combatRoute(x, z, px, pz) || !los(px, pz, player.x, player.z, 1.3, playerEyeHeight())) continue;
         return { x, z, px, pz };
       }
     }
@@ -6869,7 +6887,8 @@ let aiming = false;            // right mouse held = aim down sights
 let thirdPerson = false;       // V toggles the over-the-shoulder camera
 
 function camX() { return player.x; }
-function camY() { return Pursuit.on ? Pursuit.SEAT_Y : EYE + Math.sin(player.bob) * 0.035; }
+function playerEyeHeight() { return EYE - 1.28 * (player.prone || 0); }
+function camY() { return Pursuit.on ? Pursuit.SEAT_Y : playerEyeHeight() + Math.sin(player.bob) * 0.035 * (1 - 0.75 * player.prone); }
 function camZ() { return player.z; }
 
 function update(dt) {
@@ -6891,11 +6910,12 @@ function update(dt) {
   } else stuckSince = 0;
   if (Pursuit.on) Pursuit.drive(dt);   // PURSUIT: you are the car; WASD drive it
   else {
-  const sprint = keys.ShiftLeft || keys.ShiftRight;
+  player.prone += ((player.crawling ? 1 : 0) - player.prone) * (1 - Math.exp(-6 * dt));
+  const sprint = (keys.ShiftLeft || keys.ShiftRight) && !player.crawling && player.prone < 0.1;
   // ease into / out of the sights, and walk slower while they are up
   const wantAds = (aiming && player.alive && !sprint) ? 1 : 0;
   player.ads += (wantAds - player.ads) * Math.min(1, dt * 11);
-  const sp = (sprint ? SPRINT : MOVE) * (1 - 0.35 * player.ads) * dt;
+  const sp = (sprint ? SPRINT : MOVE) * (1 - 0.78 * player.prone) * (1 - 0.35 * player.ads) * dt;
   const fy = player.yaw;
   const fx = -Math.sin(fy), fz = -Math.cos(fy);   // forward
   const rx = Math.cos(fy), rz = -Math.sin(fy);    // right
@@ -6907,7 +6927,7 @@ function update(dt) {
   const ml = Math.hypot(mx, mz);
   if (ml > 0) {
     tryMove(player.x + mx / ml * sp, player.z + mz / ml * sp, PLAYER_RAD);
-    player.bob += dt * (sprint ? 13 : 9);
+    player.bob += dt * (sprint ? 13 : 9) * (1 - 0.65 * player.prone);
     player.walking = 1;
   } else { player.bob += dt * 1.6; player.walking = 0; }
   }
@@ -6935,7 +6955,7 @@ function update(dt) {
     e.vest.emissive.setHex(fl ? 0x7a1408 : 0x000000);
     const dx = player.x - e.x, dz = player.z - e.z;
     const dist = Math.hypot(dx, dz) || 1;
-    const seen = los(e.x, e.z, player.x, player.z, (1.3 - (e.crouch || 0)) * (1 - (e.prone || 0)) + 0.35 * (e.prone || 0), EYE);
+    const seen = los(e.x, e.z, player.x, player.z, (1.3 - (e.crouch || 0)) * (1 - (e.prone || 0)) + 0.35 * (e.prone || 0), playerEyeHeight());
     const ux = dx / dist, uz = dz / dist;
 
     // ---- desired heading: the same tactics, with human texture ----------
@@ -6976,7 +6996,7 @@ function update(dt) {
     if (e.cover) {
       const c = e.cover;
       // The player can flank a hiding enemy; do not camp exposed forever.
-      const exposed = los(player.x, player.z, c.x, c.z, EYE, 1.24);
+      const exposed = los(player.x, player.z, c.x, c.z, playerEyeHeight(), 1.24);
       if (dist < 3.5 || exposed || (e.combatTimer <= 0 && ['seek', 'peekMove', 'return'].includes(e.combatState))) {
         e.cover = null; e.combatState = 'advance'; e.coverCheck = rand(1, 2);
       } else {
@@ -7145,22 +7165,7 @@ function update(dt) {
     e.headPivot.rotation.x = -(e.upper.rotation.x + e.body.rotation.x) * (0.75 + 0.2*e.prone);
     e.headPivot.rotation.z = -(e.upper.rotation.z + e.body.rotation.z) * 0.8;
 
-    // Keep the weapon level and solve each arm from shoulder to its grip.
-    e.rifle.position.set(0.04, 1.16 - e.prone*0.18, 0.16 + e.prone*0.57 - e.recoil*0.025);
-    e.rifle.rotation.set(-e.recoil*0.04, chestYaw, 0);
-    e.g.updateMatrixWorld(true);
-    for (const arm of e.arms) {
-      const shoulder=e.upper.localToWorld(new THREE.Vector3(arm.side*0.205,0.25,0));e.g.worldToLocal(shoulder);
-      const hand=e.rifle.localToWorld(new THREE.Vector3(arm.side<0?-0.035:0.055,arm.side<0?0.03:-0.07,arm.side<0?0.34:-0.08));e.g.worldToLocal(hand);
-      const elbow=shoulder.clone().lerp(hand,0.48);
-      elbow.x+=arm.side*0.10;elbow.y-=0.13*(1-e.prone)+0.07*e.prone;
-      for(const [index,from,to] of [[0,shoulder,elbow],[1,elbow,hand]]) {
-        const mesh=arm.segments[index], delta=to.clone().sub(from);
-        mesh.position.copy(from).add(to).multiplyScalar(0.5);mesh.scale.y=delta.length();
-        mesh.quaternion.setFromUnitVectors(UP,delta.normalize());
-      }
-      arm.glove.position.copy(hand);
-    }
+    poseCombatArms(e, chestYaw);
 
     const canFire = !['hide', 'seek', 'return'].includes(e.combatState) && (e.prone < 0.1 || e.prone > 0.9);
     if (!canFire) e.burst = 0;
@@ -7186,7 +7191,7 @@ function update(dt) {
                t.x1, t.y1, t.z1, false);
 
     if (!t.checked) {
-      const ty = Pursuit.on ? 1.2 : EYE;       // PURSUIT: the target is the car + you on it
+      const ty = Pursuit.on ? 1.2 : playerEyeHeight();       // PURSUIT: the target is the car + you on it
       const ax = pxs - player.x, ay = pys - ty, az = pzs - player.z;
       const bx = t.x1 - player.x, by = t.y1 - ty, bz = t.z1 - player.z;
       const sx = bx - ax, sy = by - ay, sz = bz - az;
@@ -7194,7 +7199,7 @@ function update(dt) {
       let u = seg > 0 ? -(ax * sx + ay * sy + az * sz) / seg : 0;
       u = clamp(u, 0, 1);
       const miss = Math.hypot(ax + sx * u, ay + sy * u, az + sz * u);
-      if (miss < (Pursuit.on ? 1.0 : 0.42)) {
+      if (miss < (Pursuit.on ? 1.0 : 0.42 - 0.20 * player.prone)) {
         t.checked = true;
         hurt(Pursuit.on ? rand(2.5, 5) : (t.damage || 10) * rand(0.85,1.15));   // the car soaks some of it
         tracers.splice(i, 1);
@@ -7404,7 +7409,7 @@ const Comms = (() => {
   return { init, request };
 })();
 
-// --------------------------------------------------------- PURSUIT (v3.51)
+// --------------------------------------------------------- PURSUIT (v3.52)
 // A CYBERPUNK variant built from the user's reference frame (~/car.png): YOU
 // sit in your own car (first person, rifle in hand, the car itself not drawn)
 // and the black supercar from that shot drives ahead of you like traffic —
@@ -7577,7 +7582,7 @@ const Pursuit = (() => {
     S.on = on;
     setEndless(on);
     document.body.classList.toggle("pursuit", on);
-    if (on) { thirdPerson = false; updateBadge(); }      // first person only: you are in the seat
+    if (on) { thirdPerson = false; player.crawling = false; player.prone = 0; updateBadge(); }      // first person only: you are in the seat
     else Audio_.engine(0, 40);
     S.car.visible = on;
     S.lead.g.visible = on;
@@ -8150,6 +8155,11 @@ const Pursuit = (() => {
 addEventListener("keydown", e => {
   if (e.code === "Escape" && mode === "play") { pause(); return; }  // ESC must stop the render loop, not just the lock
   keys[e.code] = true;
+  if (e.code === 'KeyC' && !e.repeat && mode === 'play' && player.alive && !Pursuit.on) {
+    e.preventDefault(); player.crawling = !player.crawling;
+    toast(player.crawling ? 'CRAWLING — WASD to move · C to stand' : 'STANDING — C to crawl');
+    updateBadge();
+  }
   if (e.code === "KeyR" && mode === "play" && player.alive && player.reloading <= 0 && player.ammo < MAG) {
     player.reloading = RELOAD_MS;
     Audio_.click();
@@ -8337,18 +8347,23 @@ function frame(now) {
     if (thirdPerson) {
       player.wk = (player.wk || 0) + ((player.walking ? 1 : 0) - (player.wk || 0)) * Math.min(1, 10 * dt);
       const wkw = player.wk;
-      agent.g.position.set(player.x,
-        wkw > 0.1 ? clamp(-Math.min(soleHeight(agent.legL), soleHeight(agent.legR)), -0.10, 0.05)
-                  : 0,
-        player.z);
-      agent.g.rotation.y = player.yaw + Math.PI;    // the model faces +Z
-      agent.upper.rotation.x = -player.pitch;        // rifle follows your aim
-      const stride = Math.sin(player.bob * 7) * (0.04 + 0.46 * wkw);
-      agent.legL.rotation.x = stride;
-      agent.legR.rotation.x = -stride;
-      agent.legL.knee.rotation.x = wkw * 1.15 * Math.max(0, -Math.cos(player.bob * 7)) ** 2;
-      agent.legR.knee.rotation.x = wkw * 1.15 * Math.max(0, Math.cos(player.bob * 7)) ** 2;
-      agent.g.rotation.x = player.kick * 0.03;
+      const prone = player.prone;
+      agent.prone = prone; agent.recoil = player.kick;
+      agent.g.position.set(player.x, -0.67 * prone, player.z);
+      agent.g.rotation.set(0, player.yaw + Math.PI, 0);
+      agent.body.rotation.set(1.37 * prone, 0, Math.sin(player.bob)*0.015*wkw);
+      agent.upper.rotation.set(-player.pitch * (1-prone), 0, 0);
+      agent.headPivot.rotation.x = -(agent.body.rotation.x + agent.upper.rotation.x)*0.95;
+      const stride = Math.sin(player.bob) * 0.42 * wkw;
+      for(const [leg,side] of [[agent.legL,1],[agent.legR,-1]]) {
+        const beat=Math.max(0,Math.sin(player.bob)*side)*wkw;
+        leg.rotation.x = side*stride*(1-prone) + (1.50-beat*0.17)*prone;
+        leg.rotation.z = -side*(0.10+beat*0.12)*prone;
+        leg.knee.rotation.x = Math.max(0,-side*Math.cos(player.bob))*0.8*wkw*(1-prone) + (0.20+beat*0.60)*prone;
+        leg.ankle.rotation.x = (-leg.rotation.x-leg.knee.rotation.x)*(1-prone);
+      }
+      poseCombatArms(agent, 0, player.pitch);
+
     }
 
     // ---- camera: first person, or over the shoulder ---------------------
@@ -8367,7 +8382,7 @@ function frame(now) {
       // rounds still agree.
       const cp = Math.cos(player.pitch);
       const dir = new THREE.Vector3(-cp * Math.sin(player.yaw), Math.sin(player.pitch), -cp * Math.cos(player.yaw));
-      const eye = new THREE.Vector3(player.x, EYE, player.z);
+      const eye = new THREE.Vector3(player.x, playerEyeHeight(), player.z);
       const right = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
       const focus = eye.clone().addScaledVector(dir, 30);
       let dist = 3.1 - ad * 0.9;
@@ -8376,7 +8391,7 @@ function frame(now) {
       for (let i = 0; i < 8; i++) {
         cam.copy(eye).addScaledVector(dir, -dist).addScaledVector(right, shoulder);
         cam.y = eye.y + 0.24 + dist * 0.03;
-        if (dist < 0.7 || los(player.x, player.z, cam.x, cam.z)) break;
+        if (dist < 0.7 || los(player.x, player.z, cam.x, cam.z, eye.y, cam.y)) break;
         dist *= 0.7;                                  // pull in out of walls
       }
       camera.position.copy(cam);
@@ -8487,7 +8502,7 @@ try {                             // operative's last pick survives reloads
 } catch (e) {}
 setEnvironment(bootEnv);          // L cycles day -> cyberpunk -> hunted
 Comms.init();
-toast("STREET/AGENT v3.51 · " + ENV[envName].label);
+toast("STREET/AGENT v3.52 · " + ENV[envName].label);
 requestAnimationFrame(frame);
 
 // ?play=1 skips the menu (useful for kiosks, screenshots and testing).
