@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>STREET / AGENT v3.59</title>
+<title>STREET / AGENT v3.60</title>
 <style>
   :root {
     --amber: #ffb347;
@@ -224,7 +224,7 @@
   <div class="box">
     <h1>STREET <span>/</span> AGENT</h1>
     <div class="sub" id="ovsub">Sector 7 · night watch</div>
-    <div class="verline">v3.59 — gunslinger, ranger, hit reactions, real falls, own gun sounds · C to crawl · PURSUIT: N = restart · K lights · F reflections · VERTICAL 9:16 (O)</div>
+    <div class="verline">v3.60 — 3rd-person aim fixed, no more walking through the bridge pylons · C to crawl · PURSUIT: N = restart · K lights · F reflections · VERTICAL 9:16 (O)</div>
     <div class="profiles">
       <button id="profDay" class="pbtn" type="button">DAY</button>
       <button id="profCyber" class="pbtn" type="button">CYBERPUNK</button>
@@ -477,7 +477,7 @@ function setMSAASamples(n) {
 function updateBadge() {
   const el = document.getElementById("ver");
   const MAPTAG = { street: "SECTOR 7", arena: "OVERRUN YARD", neon: "SUNSET VIADUCT" };
-  if (el) el.innerHTML = 'STREET/AGENT <b>v3.59</b> · ' + (envName === "pursuit" ? "IN THE CAR" : (thirdPerson ? "3RD" : "1ST") + " PERSON" + (player.crawling ? " · CRAWLING" : "")) + " · "
+  if (el) el.innerHTML = 'STREET/AGENT <b>v3.60</b> · ' + (envName === "pursuit" ? "IN THE CAR" : (thirdPerson ? "3RD" : "1ST") + " PERSON" + (player.crawling ? " · CRAWLING" : "")) + " · "
     + ENV[envName].label + " · " + (MAPTAG[curMap] || curMap.toUpperCase());
 }
 
@@ -3813,7 +3813,7 @@ function buildNeon() {
       arenaTubeMat(0x46e0ff));
     archNeon.castShadow = false;
     neonWorld.add(archNeon);
-    for (const sx of [-15.2, 15.2]) add(boxG, edgeConc, sx, 0.9, gz, 0.8, 1.8, 0.8);
+    for (const sx of [-15.2, 15.2]) { add(boxG, edgeConc, sx, 0.9, gz, 0.8, 1.8, 0.8); neonRect(sx, gz, 0.8, 0.8, false); }
     const jp = gz === 76;
     const word = jp ? "\u30ab\u30d6\u30ad\u30d6\u30eb\u30fc\u30d0\u30fc\u30c9" : "SUNSET VIADUCT";
     const hung3 = new THREE.Mesh(new THREE.PlaneGeometry(jp ? 10 : 9, 2.4),
@@ -3824,7 +3824,8 @@ function buildNeon() {
 
   // pylons marching into the bay under the deck
   for (const pz of [44, 92, 140, 188])
-    for (const sx of [-12, 12]) { add(boxG, wallConc, sx, -6.5, pz, 2.4, 13, 2.4); add(boxG, wallConc, sx, 0.9, pz, 3.4, 2.2, 3.4); }
+    for (const sx of [-12, 12]) { add(boxG, wallConc, sx, -6.5, pz, 2.4, 13, 2.4); add(boxG, wallConc, sx, 0.9, pz, 3.4, 2.2, 3.4);
+      neonRect(sx, pz, 3.4, 3.4, true, 2.0); }   // v3.60: the pylon heads stand 2 m proud of the deck — they had no collider, so people walked through them
 
   // ---- bridge lamps: warm sodium, the reference's upper amber half
   const matLampTube = arenaTubeMat(0xffb060);
@@ -4338,6 +4339,7 @@ function buildNeon() {
   for (const [cx2, cz2] of [[-9.6, 47], [9.9, 74.5], [-10.2, 137], [-9.2, 96], [12.4, 152]]) {
     const cone = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.66, 10), matCone);
     cone.position.set(cx2, 0.33, cz2); cone.castShadow = true; neonWorld.add(cone);
+    neonRect(cx2, cz2, 0.5, 0.5, false);
   }
 
   const matDeckDot = new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 1.5, 0.7), toneMapped: false });
@@ -9255,7 +9257,7 @@ try {                             // operative's last pick survives reloads
 } catch (e) {}
 setEnvironment(bootEnv);          // L cycles day -> cyberpunk -> hunted
 Comms.init();
-toast("STREET/AGENT v3.59 · " + ENV[envName].label);
+toast("STREET/AGENT v3.60 · " + ENV[envName].label);
 requestAnimationFrame(frame);
 
 // ?play=1 skips the menu (useful for kiosks, screenshots and testing).
@@ -9320,7 +9322,7 @@ window.__sa = {
   setAiming: v => { aiming = !!v; }, getAds: () => player.ads,
   agent, getThirdPerson: () => thirdPerson, setThirdPerson: v => { thirdPerson = !!v; updateBadge(); },
   setEnvironment, ENV, ENV_ORDER, getEnv: () => envName, getMap: () => curMap, Pursuit, keys,
-  inStreet, canStand, los, losBlockers, worldCars, hitsCar, player, MAPS, spawnEnemy, getMode: () => mode, getStuck: () => stuckT, getIsDay: () => envName === "day", enemies, buildSoldier, poseCombatArms, playerShoot, feedKill,
+  inStreet, canStand, los, losBlockers, colliders, WORLDS, worldCars, hitsCar, player, MAPS, spawnEnemy, getMode: () => mode, getStuck: () => stuckT, getIsDay: () => envName === "day", enemies, buildSoldier, poseCombatArms, playerShoot, feedKill,
   getMode: () => mode, setMode: m => { mode = m; },
   // Freeze a repeatable viewpoint — handy for comparing tiers or grabbing a
   // clean frame: __sa.setMode("pause"); __sa.setView(0, 6, Math.PI);
