@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>STREET / AGENT v3.60</title>
+<title>STREET / AGENT v3.64</title>
 <style>
   :root {
     --amber: #ffb347;
@@ -224,7 +224,7 @@
   <div class="box">
     <h1>STREET <span>/</span> AGENT</h1>
     <div class="sub" id="ovsub">Sector 7 · night watch</div>
-    <div class="verline">v3.60 — 3rd-person aim fixed, no more walking through the bridge pylons · C to crawl · PURSUIT: N = restart · K lights · F reflections · VERTICAL 9:16 (O)</div>
+    <div class="verline">v3.64 — 12-person cast: the original six + six reference characters · C to crawl · PURSUIT: N = restart · K lights · F reflections · VERTICAL 9:16 (O)</div>
     <div class="profiles">
       <button id="profDay" class="pbtn" type="button">DAY</button>
       <button id="profCyber" class="pbtn" type="button">CYBERPUNK</button>
@@ -477,7 +477,7 @@ function setMSAASamples(n) {
 function updateBadge() {
   const el = document.getElementById("ver");
   const MAPTAG = { street: "SECTOR 7", arena: "OVERRUN YARD", neon: "SUNSET VIADUCT" };
-  if (el) el.innerHTML = 'STREET/AGENT <b>v3.60</b> · ' + (envName === "pursuit" ? "IN THE CAR" : (thirdPerson ? "3RD" : "1ST") + " PERSON" + (player.crawling ? " · CRAWLING" : "")) + " · "
+  if (el) el.innerHTML = 'STREET/AGENT <b>v3.64</b> · ' + (envName === "pursuit" ? "IN THE CAR" : (thirdPerson ? "3RD" : "1ST") + " PERSON" + (player.crawling ? " · CRAWLING" : "")) + " · "
     + ENV[envName].label + " · " + (MAPTAG[curMap] || curMap.toUpperCase());
 }
 
@@ -6313,7 +6313,28 @@ const ENEMY_PEOPLE = [
   { name: 'Elena', gender: 'woman', skin: 0xe0b695, hair: 0x9a3218, cloth: 0x566f83 },
   { name: 'Dev', gender: 'man', skin: 0x64412c, hair: 0x181214, cloth: 0x89705b },
 ];
-let enemyPersonIndex = 0;
+// Keep identities out of the crowd while alive, riding in a car, or still
+// visible as a body. Prefer at least 12 spawns between appearances/deaths;
+// if most of the cast is occupied, use the longest-absent available person.
+const enemyLastSeen = new Map();
+let enemyAppearance = 0;
+function nextEnemyPerson() {
+  const occupied = new Set([...enemies, ...corpses, ...Pursuit.cars.map(c => c.shooter),
+    ...Pursuit.wrecks.map(w => w.shooter)]
+    .map(e => e.person.name));
+  const available = ENEMY_PEOPLE.filter(p => !occupied.has(p.name));
+  if (!available.length) return null; // defer the spawn instead of making a twin
+  const unseen = available.filter(p => !enemyLastSeen.has(p.name));
+  const referenceDebuts = unseen.filter(p => p.reference);
+  const rested = available.filter(p => enemyAppearance - enemyLastSeen.get(p.name) >= 12);
+  // Prefer unused people, then randomly choose among the six longest absent.
+  // This avoids both the old fixed cycle and a repeat at a shuffle boundary.
+  const pool = referenceDebuts.length ? referenceDebuts : unseen.length ? unseen : (rested.length ? rested : available)
+    .sort((a, b) => enemyLastSeen.get(a.name) - enemyLastSeen.get(b.name)).slice(0, 6);
+  const person = pool[Math.floor(Math.random() * pool.length)];
+  enemyLastSeen.set(person.name, ++enemyAppearance);
+  return person;
+}
 // Shared smooth geometry keeps close-up faces rounded without duplicating
 // vertex buffers for every eye, ear and strand across the crowd.
 const faceOvalGeometry = new THREE.SphereGeometry(1, 24, 18);
@@ -6474,7 +6495,7 @@ function beardGeo(female, kind) {
   g.computeVertexNormals();
   return beardGeoC[k] = g;
 }
-// Who looks like what: six people, six silhouettes.
+// Each identity has its own hair, outfit and proportions.
 const HAIR_STYLES = {           // cap = [front hairline, nape, over-ear, front volume, curl]
   Mara:  { cap: [0.50, -0.80, -0.10, 0.03], part: 0,  long: { bottom: -0.20, open: 0.80, back: 1 } },
   Nia:   { cap: [0.46, -0.80, 0.05, 0.02], part: 0,  tail: true },
@@ -6519,20 +6540,39 @@ function faceSkinTex(skinHex, hairHex, kind) {
   return t;
 }
 const HEAD_EYE_Y = 0.172;
+const individualFaceCache = {};
+function individualFace(person, female) {
+  if (!person.reference) return faceMask(female);
+  if (individualFaceCache[person.reference]) return individualFaceCache[person.reference];
+  const [jaw, cheek, chin] = {
+    Lara: [1.03, 0.025, 1.00], Snake: [1.22, 0.045, 0.92],
+    Lightning: [0.89, 0.012, 1.03], Tifa: [0.97, 0.035, 0.97],
+    Squall: [1.07, 0.020, 1.03], Aeris: [0.92, 0.045, 0.94],
+  }[person.reference];
+  const geo = faceMask(female).clone(), p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    let x=p.getX(i), y=p.getY(i), z=p.getZ(i);
+    x *= 1 + (jaw-1)*Math.max(0,-y);
+    if(y < -0.35)y=-0.35+(y+0.35)*chin;
+    if(z>0.3)z+=cheek*Math.exp(-((Math.abs(x)-0.52)**2)/0.07-((y+0.12)**2)/0.07);
+    p.setXYZ(i,x,y,z);
+  }
+  geo.computeVertexNormals(); return individualFaceCache[person.reference]=geo;
+}
 function soldierFace(pivot, person) {
   pivot.clear();
   const female = person.gender === 'woman';
   const style = HAIR_STYLES[person.name] || { cap: female ? [0.48, -0.2, -0.05, 0.04] : [0.52, -0.42, 0.12, 0.18], part: 1 };
   const skinColor = new THREE.Color(person.skin);
   const skin = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.62 });
-  const lipColor = skinColor.clone().lerp(new THREE.Color(0xa24a55), female ? 0.46 : 0.14);
+  const lipColor = skinColor.clone().lerp(new THREE.Color(0x934b4c), female ? 0.38 : 0.22);
   const lips = new THREE.MeshStandardMaterial({ color: lipColor, roughness: female ? 0.45 : 0.55 });
   const hairColor = new THREE.Color(person.hair);
   const hair = hairMaterial(hairColor);
   const browMat = new THREE.MeshStandardMaterial({ color: person.hair, roughness: 0.76 });
   const dark = new THREE.MeshStandardMaterial({ color: 0x1a1414, roughness: 0.8 });
   const whites = new THREE.MeshStandardMaterial({ color: 0xcfc5b8, roughness: 0.35 });
-  const iris = new THREE.MeshStandardMaterial({ color: ['Mara', 'Dev'].includes(person.name) ? 0x597066 : person.name === 'Elena' ? 0x68818e : 0x674c32, roughness: 0.38 });
+  const iris = new THREE.MeshStandardMaterial({ color: style.iris ?? (['Mara', 'Dev'].includes(person.name) ? 0x597066 : person.name === 'Elena' ? 0x68818e : 0x674c32), roughness: 0.38 });
   const oval = (mat, x, y, z, sx, sy, sz, parent = pivot) => {
     const mesh = new THREE.Mesh(faceOvalGeometry, mat);
     mesh.position.set(x, y, z); mesh.scale.set(sx, sy, sz); parent.add(mesh); return mesh;
@@ -6545,18 +6585,18 @@ function soldierFace(pivot, person) {
   oval(skin, 0, 0.02, -0.012, female ? 0.042 : 0.048, 0.075, female ? 0.042 : 0.048);
   oval(skin, 0, 0.176, -0.030, 0.099, 0.112, 0.106);
   const fw = (female ? 0.097 : 0.104) * (style.face || 1);
-  const faceMat = style.beard
+  const faceMat = style.beard || person.reference
     ? new THREE.MeshStandardMaterial({ map: faceSkinTex(person.skin, person.hair, style.beard), roughness: 0.66 })
     : skin;
-  const face = new THREE.Mesh(faceMask(female), faceMat);
+  const face = new THREE.Mesh(individualFace(person, female), faceMat);
   face.position.set(0, 0.147, 0); face.scale.set(fw, 0.134, 0.101); pivot.add(face);
   // ears (+ small studs for the women)
   for (const side of [-1, 1]) {
-    oval(skin, side * 0.104, 0.140, -0.022, 0.012, 0.026, 0.018);
+    oval(skin, side * 0.104, 0.140, -0.022, person.reference ? 0.009 : 0.012, 0.024, 0.014);
     if (female) oval(new THREE.MeshStandardMaterial({ color: 0xd9b36a, metalness: 0.9, roughness: 0.3 }), side * 0.110, 0.118, -0.016, 0.0045, 0.0045, 0.0045);
   }
   // nose: long soft bridge, small tip, two wings (a touch finer for women)
-  const nf = female ? 0.88 : 1;
+  const nf = style.nose ?? (female ? 0.88 : 1);
   oval(skin, 0, 0.148, 0.083, 0.0085 * nf, 0.026, 0.011);
   oval(skin, 0, 0.123, 0.089, 0.0098 * nf, 0.0082, 0.0095);
   for (const side of [-1, 1]) oval(skin, side * 0.0098 * nf, 0.119, 0.083, 0.0068 * nf, 0.0058, 0.0072);
@@ -6564,8 +6604,11 @@ function soldierFace(pivot, person) {
   // and an iris that can glance (both driven by faceTick)
   const eyes = [];
   for (const side of [-1, 1]) {
-    const x = side * 0.041;
+    const x = side * 0.041 * (style.eyeSpace || 1);
     const eg = new THREE.Group(); eg.position.set(x, HEAD_EYE_Y, 0.074); pivot.add(eg);
+    eg.rotation.z = side * (style.eyeTilt || 0);
+    eg.scale.y = style.eyeHeight || 1;
+    if(person.reference)eg.scale.x = female ? 1.12 : 1.04;
     oval(whites, 0, 0.0010, 0, female ? 0.0178 : 0.0172, 0.0070, 0.0065, eg);   // iris rests on its lower edge
     const look = new THREE.Group(); eg.add(look);
     oval(iris, 0, 0, 0.0052, 0.0068, 0.0068, 0.0016, look);
@@ -6579,7 +6622,7 @@ function soldierFace(pivot, person) {
     eyes.push({ look, lid, lash, lashX: female ? 0.0012 * side : 0 });
   }
   // mouth: fuller for the women, and a soft parting line
-  const lr = female ? 1.3 : 1;
+  const lr = (style.lips ?? (female ? 1.3 : 1)) * (person.reference ? 0.74 : 1);
   curve(lips, [[-0.020, 0.0905, 0.080], [-0.008, 0.0925, 0.0845], [0, 0.0915, 0.0855], [0.008, 0.0925, 0.0845], [0.020, 0.0905, 0.080]], 0.0026 * lr);
   curve(lips, [[-0.017, 0.0862, 0.081], [0, 0.0832, 0.0858], [0.017, 0.0862, 0.081]], 0.0032 * lr);
   curve(dark, [[-0.019, 0.0888, 0.0815], [0, 0.0886, 0.0862], [0.019, 0.0888, 0.0815]], 0.0009);
@@ -6609,6 +6652,17 @@ function soldierFace(pivot, person) {
     tie.position.set(0, 0.255, -0.142); tie.rotation.x = 1.1; pivot.add(tie);
     inSway(new THREE.Mesh(hairTail([[0, 0.262, -0.150], [0.01, 0.20, -0.205], [0.03, 0.08, -0.215], [0.05, -0.06, -0.19]], 0.034), hair));
   }
+  if (style.buns) {
+    for (const side of [-1, 1]) oval(hair, side * 0.087, 0.255, -0.065, 0.043, 0.045, 0.044);
+  }
+  if (style.mohawk) {
+    for (let i = 0; i < 7; i++) {
+      const lock = oval(hair, 0, 0.295 + Math.sin(i / 6 * Math.PI) * 0.024,
+        0.045 - i * 0.023, 0.022, 0.044, 0.025);
+      lock.rotation.x = (i - 3) * 0.12;
+    }
+  }
+  if (person.reference) referenceHair(pivot, sway, person, hair);
   pivot.userData.face = { eyes, sway, female, blink: -1, nextBlink: 1 + Math.random() * 3,
     gx: 0, gy: 0, tgx: 0, tgy: 0, nextSaccade: 0, t: Math.random() * 9 };
 }
@@ -6805,7 +6859,7 @@ function addGear(look, parts, body, chest, cloth, vest, skin, pants, glow, head,
     // combat vest + a shotgun-shell bandolier, cap on backwards
     bandolier(dark, std(0xb02a2a, 0.5), 9);
     const cap = new THREE.Group(); cap.position.set(0, 0.215, -0.02); head.add(cap);
-    const capM = std(0x5b3f8f, 0.7);
+    const capM = std(vest.color.getHex(), 0.7);
     mesh(cap, new THREE.SphereGeometry(0.118, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), capM, 0, 0, 0).scale.set(1, 0.72, 1.06);
     const bill = mesh(cap, new THREE.BoxGeometry(0.13, 0.010, 0.09), capM, 0, 0.004, -0.15); bill.rotation.x = -0.15;
     if (glow) { const gb = mesh(cap, new THREE.TorusGeometry(0.118, 0.004, 6, 30), glow, 0, 0.004, 0); gb.rotation.x = Math.PI / 2; gb.scale.set(1, 1.06, 1); }
@@ -6830,7 +6884,7 @@ function dressSoldier(parts, body, cloth, vest, person, arms, pal = enemyShared)
   vest.map = null; vest.color.setHex(O.collar); vest.roughness = O.look === "vest" ? 0.7 : cloth.roughness;
   const pants = new THREE.MeshStandardMaterial({ color: O.pants, roughness: 0.85, bumpMap: cloth.bumpMap, bumpScale: 0.004 });
   const skin = new THREE.MeshStandardMaterial({ color: person.skin, roughness: 0.58 });
-  const rimK = O.rimK ?? 1;                            // dark outfits take less, or the rim repaints them
+  const rimK = O.rimK ?? 0.3;                         // let fabric lighting carry the shape
   addRim(cloth, O.glow, 2.6, 0.55 * rimK); addRim(vest, O.glow, 2.6, 0.55 * rimK); addRim(pants, O.glow, 3.0, 0.35 * rimK); addRim(skin, O.glow, 3.2, 0.25 * rimK);
   const shoes = O.shoes ? new THREE.MeshStandardMaterial({ color: O.shoes, roughness: 0.6 }) : null;
   const showKit = O.look === "vest" || !!O.kit;                 // a combat vest keeps the plate, pouches and straps
@@ -6873,7 +6927,7 @@ function dressSoldier(parts, body, cloth, vest, person, arms, pal = enemyShared)
     }
   }
   const B = BUILDS[person.name] || { h: female ? 0.94 : 1, sh: 1, arm: female ? 0.88 : 1, leg: 1 };
-  const handMat = ["vest", "leather", "gunslinger", "ranger"].includes(O.look) ? pal.boot : skin;     // gloves for the kit-wearers
+  const handMat = O.gloves || ["vest", "leather", "gunslinger", "ranger"].includes(O.look) ? pal.boot : skin;
   for (const arm of arms) {                              // tapered bicep / forearm, filled elbow
     arm.segments[0].geometry = B.muscle ? BODY.upperArmM() : BODY.upperArm();
     arm.segments[1].geometry = B.muscle ? BODY.foreArmM() : BODY.foreArm();
@@ -6885,6 +6939,10 @@ function dressSoldier(parts, body, cloth, vest, person, arms, pal = enemyShared)
     arm.elbowBall = new THREE.Mesh(new THREE.SphereGeometry((female ? 0.042 : 0.047) * B.arm * (O.sleeves === "rolled" ? 1.25 : 1), 10, 8), O.sleeves === "rolled" ? cloth : bare[1] ? skin : cloth);   // rolled: the cuff bunched at the elbow
     parts.g.add(arm.elbowBall);
     if (O.sleeves === "short") { arm.sleeve = new THREE.Mesh(BODY.sleeve(), cloth); arm.sleeveLen = 0.5; parts.g.add(arm.sleeve); }
+  }
+  if (person.reference) {
+    dressReference(parts, body, chest, torso, cloth, vest, skin, pants, person, arms, Bq);
+    return;
   }
   // ---- per-look details -----------------------------------------------------
   const glow = new THREE.MeshBasicMaterial({ color: O.glow, toneMapped: false });
@@ -6933,6 +6991,316 @@ function dressSoldier(parts, body, cloth, vest, person, arms, pal = enemyShared)
 // shape (not one rifle stretched to three lengths), with its own grip points
 // for the hands, and a pistol held out at arm's length instead of shouldered.
 const WEAPON_OF = { Nia: "Pistol", Elena: "SMG", Mara: "Marksman", Jonas: "Carbine", Rafi: "LMG", Dev: "Shotgun" };
+// v3.62: six individually modelled looks from the user's character references.
+// v3.63: they are six NEW people (12 in all) instead of replacing six of the
+// roster, and each is pushed to one loud signature read at fighting distance:
+// a saturated colour block, a silhouette breaker and its own neon trim.
+const REFERENCE_CAST = {
+  Lark: { reference: 'Lara', gender: 'woman', skin: 0xc39977, hair: 0x2a1a12, weapon: 'Pistol',
+    build: { h: 0.98, sh: 0.91, arm: 0.85, leg: 0.96, hips: 1.00 },
+    style: { cap: [0.47,-0.72,0.02,0.09], face: 0.96, iris: 0x694d31, eyeTilt: 0.08, eyeHeight: 0.9, nose: 0.82 },
+    outfit: { look: 'survivor', top: 0x4f9a8c, collar: 0x2f5c54, pants: 0x7a5a38, glow: 0xffa640, sleeves: 'none', legs: 'long', shoes: 0x3a2a1e, rimK: 0.4 } },
+  Adder: { reference: 'Snake', gender: 'man', skin: 0xb28a6b, hair: 0x392c22, weapon: 'Carbine',
+    build: { h: 1.03, sh: 1.14, arm: 1.12, leg: 1.08, muscle: true },
+    style: { cap: [0.45,-0.85,-0.1,0.13], face: 1.06, beard: 'full', iris: 0x777b5d, eyeHeight: 0.74, eyeTilt: -0.08, nose: 1.14, lips: 0.85 },
+    outfit: { look: 'infiltrator', top: 0x3b4428, collar: 0x22271a, pants: 0x333b22, glow: 0x5dff7a, sleeves: 'long', legs: 'long', gloves: true, rimK: 0.15 } },
+  Flash: { reference: 'Lightning', gender: 'woman', skin: 0xe0b79e, hair: 0xf08fb0, weapon: 'SMG',
+    build: { h: 1.01, sh: 0.90, arm: 0.83, leg: 0.94 },
+    style: { cap: [0.46,-0.76,-0.05,0.10], face: 0.96, iris: 0x73959b, eyeHeight: 0.88, eyeTilt: 0.11, nose: 0.78, lips: 1.12 },
+    outfit: { look: 'vanguard', top: 0xf2efe6, collar: 0xc41f34, pants: 0x4a352e, glow: 0xff4f7a, sleeves: 'none', legs: 'shorts', gloves: true, shoes: 0x5b4638, rimK: 0.75 } },
+  Faye: { reference: 'Tifa', gender: 'woman', skin: 0xe0b69c, hair: 0x120e10, weapon: 'Marksman',
+    build: { h: 0.98, sh: 0.91, arm: 0.86, leg: 1.02, hips: 1.04 },
+    style: { cap: [0.49,-0.81,-0.10,0.06], face: 0.94, iris: 0x753c34, eyeHeight: 1.05, eyeTilt: 0.07, nose: 0.77, lips: 1.2,
+      long: { bottom: -0.55, open: 0.82, back: 1 } },
+    outfit: { look: 'brawler', top: 0xffffff, collar: 0x18161a, pants: 0x18161a, glow: 0xff3a3a, sleeves: 'none', legs: 'shorts', shoes: 0xc4222c, gloves: true, rimK: 0.75 } },
+  Ash: { reference: 'Squall', gender: 'man', skin: 0xd2ae91, hair: 0x5a3a26, weapon: 'Shotgun',
+    build: { h: 1.02, sh: 1.03, arm: 0.98, leg: 0.99 },
+    style: { cap: [0.42,-0.84,-0.08,0.18], face: 0.97, iris: 0x477bba, eyeHeight: 0.87, eyeTilt: 0.10, nose: 0.95 },
+    outfit: { look: 'furjacket', top: 0x16181d, collar: 0x0e1014, pants: 0x1c1d22, glow: 0x6fd0ff, sleeves: 'long', legs: 'long', gloves: true, rough: 0.42, rimK: 0.9 } },
+  Rose: { reference: 'Aeris', gender: 'woman', skin: 0xe2b69b, hair: 0x7a5335, weapon: 'Pistol',
+    build: { h: 0.96, sh: 0.89, arm: 0.82, leg: 0.92 },
+    style: { cap: [0.50,-0.74,-0.06,0.13], face: 0.96, iris: 0x329b7f, eyeHeight: 1.13, eyeTilt: 0.03, nose: 0.77, lips: 1.2 },
+    outfit: { look: 'redbolero', top: 0xc8283c, collar: 0x7a1826, pants: 0xe98aa8, glow: 0xff7fb6, sleeves: 'short', legs: 'long', shoes: 0x523e30, rimK: 0.75 } },
+};
+for (const [name, ref] of Object.entries(REFERENCE_CAST)) {
+  ENEMY_PEOPLE.push({ name, gender: ref.gender, reference: ref.reference, skin: ref.skin, hair: ref.hair, cloth: ref.outfit.top });
+  BUILDS[name] = ref.build; HAIR_STYLES[name] = ref.style;
+  OUTFITS[name] = ref.outfit; WEAPON_OF[name] = ref.weapon;
+}
+
+// Curved, tapered locks have volume and pointed ends. They follow the head or
+// the existing hair sway pivot; they aren't pictures stuck on the face.
+function referenceHair(head, sway, person, hair) {
+  const kind = person.reference;
+  const lockHair = hair.clone(); lockHair.alphaTest = 0;
+  const lock = (points, width, depth = 0.012, moving = false, mat = lockHair) => {
+    const path = new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(...p)));
+    const geo = new THREE.TubeGeometry(path, 16, 1, 8, false);
+    const pos = geo.attributes.position, uv = geo.attributes.uv, centre = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i++) {
+      const t = uv.getX(i); path.getPointAt(t, centre);
+      const taper = (0.55 + 0.7 * Math.sin(Math.PI * Math.min(1, t * 1.1))) * Math.pow(1-t, 0.65) + 0.015;
+      pos.setXYZ(i, centre.x + (pos.getX(i)-centre.x)*width*taper,
+        centre.y + (pos.getY(i)-centre.y)*width*taper, centre.z + (pos.getZ(i)-centre.z)*depth*taper);
+      uv.setXY(i, uv.getY(i)*2, t*0.94);
+    }
+    geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, mat);m.castShadow=true;
+    if (moving) { m.position.sub(sway.position);sway.add(m); } else head.add(m);
+    return m;
+  };
+  if (kind === 'Lara') {
+    lock([[0,0.26,-0.10],[0.02,0.16,-0.20],[0.045,-0.05,-0.24],[0.03,-0.24,-0.21],[0.0,-0.38,-0.17]],0.065,0.05,true);
+    for (const side of [-1,1]) for(let i=0;i<3;i++)
+      lock([[side*0.02,0.29,-0.01],[side*(0.07+i*0.01),0.24,0.066],[side*(0.078+i*0.008),0.13-i*0.025,0.09]],0.018,0.009);
+  } else if (kind === 'Snake' || kind === 'Squall') {
+    for(let i=0;i<9;i++) {
+      const x=(i-4)*0.022, side=i<4?-1:1;
+      lock([[x*0.45,0.252,-0.071],[x,0.283+0.008*Math.sin(i),0.025],[x+side*0.008,0.202+(i%3)*0.013,0.084]],0.025,0.013);
+      if(i%2===0)lock([[x*0.7,0.22,-0.080],[x*1.05,0.16,-0.12],[x*1.12,0.06,-0.105]],0.022,0.013);
+    }
+    for(const side of [-1,1])lock([[side*0.075,0.24,-0.03],[side*0.112,0.18,0.008],[side*0.099,0.085,0.025]],0.023,0.016);
+  } else if (kind === 'Lightning') {
+    for(let i=0;i<7;i++)lock([[-0.065+i*0.018,0.285,-0.055],[-0.04+i*0.022,0.265,0.06],[-0.003+i*0.016,0.185+(i%3)*0.023,0.098]],0.028,0.012);
+    for(let i=0;i<8;i++) {
+      const x=0.09+(i%3)*0.02;
+      lock([[0.05,0.26,-0.05],[x,0.13,-0.04],[x+0.024,-0.035,0.04],[x-0.01+(i%2)*0.055,-0.19-(i%3)*0.055,0.11]],0.035,0.018,true);
+    }
+    for(let i=0;i<3;i++)lock([[-0.06,0.24,-0.07],[-0.10,0.12,-0.08],[-0.105,0.015-i*0.026,-0.04]],0.025,0.015);
+  } else if (kind === 'Tifa') {
+    for(const side of [-1,1])for(let i=0;i<3;i++)lock([[side*0.01,0.285,-0.015],[side*0.065,0.24,0.07],[side*(0.09+i*0.009),0.06-i*0.052,0.065]],0.026,0.01);
+  } else if (kind === 'Aeris') {
+    for(const side of [-1,1])for(let i=0;i<3;i++)lock([[side*0.009,0.30,-0.02],[side*0.079,0.265,0.065],[side*(0.11+i*0.007),0.17,0.07],[side*0.09,0.01-i*0.028,0.06]],0.029,0.014);
+    // Interwoven strands down the back, ending below the shoulder blades.
+    for(let strand=0;strand<3;strand++) {
+      const points=[];
+      for(let i=0;i<12;i++){const a=i*1.6+strand*Math.PI*2/3;points.push([Math.sin(a)*0.022,0.22-i*0.043,-0.14+Math.cos(a)*0.018]);}
+      lock(points,0.025,0.023,true);
+    }
+    const ribbon = new THREE.MeshStandardMaterial({color:0xff5f98,roughness:0.7,side:THREE.DoubleSide});
+    for(const side of [-1,1]) {
+      const bow=new THREE.Mesh(faceOvalGeometry,ribbon);bow.position.set(side*0.07,0.23,-0.15);bow.scale.set(0.085,0.05,0.02);bow.rotation.z=side*0.4;head.add(bow);
+      lock([[side*0.02,0.22,-0.16],[side*0.08,0.10,-0.18],[side*0.07,-0.06,-0.17]],0.03,0.006,true,ribbon);
+    }
+  }
+}
+
+let referenceClothMaps;
+function dressReference(parts, body, chest, torso, cloth, vest, skin, pants, person, arms, build) {
+  const kind=person.reference, head=parts.headPivotRef, sh=build.sh;
+  if (!referenceClothMaps) {
+    const cv=document.createElement('canvas');cv.width=cv.height=128;
+    const cx=cv.getContext('2d'),im=cx.createImageData(128,128);
+    for(let y=0;y<128;y++)for(let x=0;x<128;x++){
+      const i=(y*128+x)*4,n=239+((x*17+y*31)%7)+(x%2?2:-2)+(y%2?1:-1);
+      im.data[i]=im.data[i+1]=im.data[i+2]=n;im.data[i+3]=255;
+    }
+    cx.putImageData(im,0,0);
+    const map=new THREE.CanvasTexture(cv);map.colorSpace=THREE.SRGBColorSpace;
+    map.wrapS=map.wrapT=THREE.RepeatWrapping;map.repeat.set(3,3);map.anisotropy=4;
+    referenceClothMaps={map,bump:map};
+  }
+  for(const mat of [cloth,vest,pants]) {mat.map=referenceClothMaps.map;mat.bumpMap=referenceClothMaps.bump;mat.bumpScale=0.0013;mat.needsUpdate=true;}
+  const mat=(color,roughness=0.8,metalness=0)=>new THREE.MeshStandardMaterial({color,roughness,metalness,side:THREE.DoubleSide});
+  const leather=mat(0x302723,0.62),dark=mat(0x202126,0.72),silver=mat(0xb8bec5,0.3,0.78),brass=mat(0x9a8054,0.4,0.7);
+  // v3.63: the same neon-trim language as the rest of the cast, in each one's own colour
+  const glow=new THREE.MeshBasicMaterial({color:OUTFITS[person.name].glow,toneMapped:false});
+  const add=(parent,geo,material,x=0,y=0,z=0)=>{const m=new THREE.Mesh(geo,material);m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;parent.add(m);return m;};
+  const box=(parent,material,x,y,z,w,h,d)=>add(parent,new THREE.BoxGeometry(w,h,d),material,x,y,z);
+  const oval=(parent,material,x,y,z,w,h,d)=>{const m=add(parent,faceOvalGeometry,material,x,y,z);m.scale.set(w,h,d);return m;};
+  const tube=(parent,material,points,r=0.004)=>add(parent,new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points.map(p=>new THREE.Vector3(...p))),16,r,5,false),material);
+  const panel=(parent,material,points)=>{
+    // Keep the front tailoring outside the curved chest instead of buried
+    // beneath it; back-mounted cape panels retain their original depth.
+    if(parent===chest)points=points.map(([x,y,z])=>[x,y,z>0?Math.max(z,0.153-0.045*Math.abs(y-0.12)):z]);
+    const xy=points.map(p=>new THREE.Vector2(p[0],p[1]));
+    const idx=THREE.ShapeUtils.triangulateShape(xy,[]).flat(),g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.Float32BufferAttribute(points.flat(),3));
+    g.setAttribute('uv',new THREE.Float32BufferAttribute(points.flatMap(p=>[p[0]+0.5,p[1]+0.5]),2));g.setIndex(idx);g.computeVertexNormals();
+    return add(parent,g,material);
+  };
+  const band=(parent,material,y,rx,rz,height=0.04)=>{
+    const m=add(parent,new THREE.CylinderGeometry(rx,rx,height,28,1,true),material,0,y,0);m.scale.z=rz/rx;return m;
+  };
+  const buckle=(parent,x,y,z,w=0.045,h=0.037)=>{
+    const m=box(parent,silver,x,y,z,w,h,0.012);box(m,leather,0,0,0.008,w*0.64,h*0.57,0.009);return m;
+  };
+  const belt=(y=0.06)=>{band(body,leather,y,0.169*(build.hips||1),0.136);buckle(body,0,y,0.143,0.056,0.044);};
+  const strap=(points,material=leather,width=0.025)=>{
+    for(let i=0;i<points.length-1;i++) {
+      const a=new THREE.Vector3(...points[i]),b=new THREE.Vector3(...points[i+1]);
+      const m=box(chest,material,0,0,0,width,a.distanceTo(b)+0.008,0.013);m.position.copy(a).add(b).multiplyScalar(0.5);m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),b.sub(a).normalize());
+    }
+  };
+  const holster=(leg,side)=>{
+    band(leg,leather,-0.15,0.098*build.leg,0.098*build.leg,0.026);
+    band(leg,leather,-0.26,0.091*build.leg,0.091*build.leg,0.022);
+    const h=box(leg,leather,side*0.104,-0.19,0.01,0.045,0.16,0.085);h.rotation.z=side*0.09;
+    box(leg,dark,side*0.104,-0.075,0.016,0.029,0.06,0.04);
+  };
+  const boots=(height,color)=>{
+    const bootMat=mat(color,0.69);
+    for(const leg of [parts.legL,parts.legR]){
+      const boot=add(leg.knee,latheSolid('referenceBoot'+height,[[0.052,-0.37],[0.059,-0.31],[0.069,-0.37+height],[0.064,-0.35+height]],16),bootMat);
+      boot.scale.set(build.leg,1,build.leg);
+      for(let i=0;i<4;i++)tube(leg.knee,leather,[[-0.037,-0.34+i*height/5,0.04],[0.037,-0.32+i*height/5,0.049]],0.003);
+      band(leg.knee,leather,-0.37+height,0.071*build.leg,0.071*build.leg,0.018);
+    }
+  };
+  // A slimmer shoulder transition and fitted torso break the broad toy shape.
+  if(torso) {
+    torso.geometry=latheSolid('refTorso'+person.gender,person.gender==='woman'
+      ? [[0.142,-0.25],[0.125,-0.15],[0.133,-0.04],[0.161,0.08],[0.169,0.15],[0.154,0.21],[0.10,0.255],[0.044,0.28]]
+      : [[0.152,-0.25],[0.14,-0.14],[0.16,0],[0.192,0.13],[0.184,0.20],[0.13,0.25],[0.052,0.28]],26);
+    torso.scale.set(sh,1,0.72);
+  }
+  // Tailored cloth follows the same curved torso surface. Continuous hems
+  // and open fronts avoid cut-paper overlays and triangle-stepped necklines.
+  const garment=(material,top,bottom=-0.25,gap=0)=>{
+    const profile=torso.geometry.parameters.points;
+    const radius=y=>{for(let i=1;i<profile.length;i++)if(profile[i].y>=y){const a=profile[i-1],b=profile[i];return THREE.MathUtils.lerp(a.x,b.x,(y-a.y)/Math.max(0.00001,b.y-a.y));}return profile.at(-1).x;};
+    const v=[],uv=[],idx=[],rows=24,cols=64;
+    for(let c=0;c<=cols;c++){
+      const a=gap+c/cols*(Math.PI*2-2*gap),end=typeof top==='function'?top(a):top;
+      for(let r=0;r<=rows;r++){
+        const t=r/rows,y=bottom+(end-bottom)*t,rad=radius(y)*1.025;
+        v.push(Math.sin(a)*rad,y,Math.cos(a)*rad);uv.push(c/cols,t);
+      }
+    }
+    for(let c=0;c<cols;c++)for(let r=0;r<rows;r++){const a=c*(rows+1)+r,b=a+rows+1;idx.push(a,b,a+1,b,b+1,a+1);}
+    const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(v,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));g.setIndex(idx);g.computeVertexNormals();
+    const m=add(chest,g,material);m.position.copy(torso.position);m.scale.copy(torso.scale);return m;
+  };
+  parts.g.userData.reference=kind;
+  // Each detail follows the relevant limb, head or body pivot in combat.
+  if(kind==='Lara'||kind==='Tifa') {
+    // Skin neckline and narrow shoulder straps over a fitted scoop-neck top.
+    if(kind==='Tifa'){torso.scale.y=0.83;torso.position.y+=0.045;}
+    torso.material=skin;
+    garment(cloth,a=>Math.cos(a)>0 ? 0.095+Math.pow(Math.sin(a),2)*0.15 : 0.20);
+    for(const side of [-1,1])strap([[side*0.095,0.08,0.127],[side*0.123,0.26,0.057],[side*0.112,0.27,-0.068]],kind==='Tifa'?dark:cloth,0.022);
+    tube(chest,kind==='Tifa'?dark:vest,[[-0.12,0.23,0.092],[-0.06,0.17,0.123],[0,0.162,0.127],[0.06,0.17,0.123],[0.12,0.23,0.092]],0.006);
+    belt();
+    if(kind==='Lara') {
+      strap([[-0.12,0.27,0.08],[-0.015,0.03,0.145],[0.13,-0.17,0.107]],leather,0.026);
+      holster(parts.legR,1);boots(0.23,0x3c3026);
+      for(const leg of [parts.legL,parts.legR])box(leg,pants,leg===parts.legL?-0.08:0.08,-0.2,0.067,0.068,0.115,0.026);
+      tube(chest,leather,[[-0.042,0.315,0.035],[0,0.22,0.133],[0.04,0.315,0.035]],0.003);
+      oval(chest,mat(0x647d69,0.38),0,0.21,0.139,0.014,0.022,0.007);
+      // Slung bow and climbing pick: the signature silhouette from the reference.
+      const wood=mat(0x9a6a3a,0.55);
+      tube(chest,wood,[[-0.20,-0.45,-0.19],[-0.33,-0.06,-0.24],[-0.25,0.30,-0.22],[-0.07,0.62,-0.18]],0.02);
+      tube(chest,glow,[[-0.20,-0.45,-0.19],[-0.07,0.62,-0.18]],0.004);
+      band(body,glow,0.06,0.172*(build.hips||1),0.139,0.008);
+      tube(body,dark,[[-0.17,-0.16,0],[-0.20,-0.36,0],[-0.27,-0.38,0]],0.009);
+      const wrap=mat(0xb2a08b);band(arms[0].segments[1],wrap,0.12,0.052,0.052,0.30);
+      tube(head,mat(0x8f5c4c),[[0.06,0.145,0.071],[0.065,0.135,0.069],[0.068,0.122,0.066]],0.0012);
+    } else {
+      // White cropped top, dark skirt, thigh-highs, red fighting gloves/boots.
+      const abdomen=add(body,BODY.pelvis(true),skin,0,0.105,0);abdomen.scale.set(0.78,0.75,0.77);
+      const skirt=add(body,new THREE.CylinderGeometry(0.167,0.205,0.22,32,1,true),dark,0,-0.055,0);skirt.scale.z=0.77;
+      for(const side of [-1,1]){
+        strap([[side*0.1,-0.16,0.12],[side*0.133,0.07,0.142],[side*0.125,0.27,0.055]],dark,0.024);
+        buckle(chest,side*0.117,-0.05,0.147,0.029,0.037);
+      }
+      for(const leg of [parts.legL,parts.legR]) {
+        const sock=add(leg,latheSolid('tifaSock',[[0.063,-0.51],[0.074,-0.36],[0.091,-0.22]],18),dark);sock.scale.set(build.leg,1,build.leg);
+        band(leg,dark,-0.22,0.092*build.leg,0.092*build.leg,0.028);
+      }
+      boots(0.32,0xc4222c);
+      band(body,glow,-0.163,0.206,0.159,0.01);
+      for(const arm of arms) {
+        band(arm.segments[1],mat(0xc4222c,0.5),0.12,0.062,0.062,0.52);
+        box(arm.hand,dark,0,0.025,-0.034,0.063,0.035,0.025);
+      }
+    }
+  } else if(kind==='Snake') {
+    belt();holster(parts.legR,1);boots(0.25,0x242a25);
+    for(const side of [-1,1]){
+      strap([[side*0.12,0.29,0.069],[side*0.135,0.12,0.149],[side*0.09,-0.15,0.118]],dark,0.037);
+      for(let i=0;i<2;i++){box(chest,vest,side*(0.065+i*0.055),-0.06,0.142,0.047,0.10,0.035);box(chest,leather,side*(0.065+i*0.055),-0.025,0.164,0.04,0.014,0.005);}
+    }
+    for(const leg of [parts.legL,parts.legR])oval(leg,vest,0,-0.465,0.056,0.065,0.088,0.026);
+    const camo=document.createElement('canvas');camo.width=camo.height=128;
+    const cc=camo.getContext('2d');cc.fillStyle='#c4c4b8';cc.fillRect(0,0,128,128);
+    for(let i=0;i<46;i++){cc.fillStyle=i%3?'#4a4a40':'#9a9a8a';cc.beginPath();
+      cc.ellipse((i*53)%128,(i*37)%128,7+(i%4)*3,3+(i%3)*2,(i%5)*0.7,0,Math.PI*2);cc.fill();}
+    const camoMap=new THREE.CanvasTexture(camo);camoMap.colorSpace=THREE.SRGBColorSpace;camoMap.wrapS=camoMap.wrapT=THREE.RepeatWrapping;camoMap.repeat.set(2,2);
+    for(const m of [cloth,pants]){m.map=camoMap;m.needsUpdate=true;}
+    const bandana=mat(0x27344a);band(head,bandana,0.225,0.108,0.108,0.05);
+    for(const side of [-1,1])panel(head,bandana,[[side*0.018,0.24,-0.13],[side*0.06,0.22,-0.14],[side*0.13,-0.16,-0.21],[side*0.07,-0.12,-0.19]]);
+    const nvg=new THREE.Group();nvg.position.set(0,0.275,0.035);nvg.rotation.x=-0.5;head.add(nvg);
+    box(nvg,dark,0,0,0,0.13,0.04,0.05);
+    for(const x of [-0.04,0,0.04]){const l=add(nvg,new THREE.CylinderGeometry(0.016,0.016,0.05,12),dark,x,0,0.04);l.rotation.x=Math.PI/2;
+      const g=add(nvg,new THREE.CircleGeometry(0.013,12),glow,x,0,0.066);}
+    oval(head,dark,-0.042,0.171,0.087,0.029,0.023,0.009);
+    tube(head,dark,[[-0.097,0.199,0.014],[-0.05,0.187,0.089],[0.02,0.195,0.092],[0.095,0.21,0.012]],0.0045);
+    box(chest,dark,-0.12,0.2,0.145,0.046,0.084,0.024);tube(chest,dark,[[-0.13,0.24,0.145],[-0.13,0.35,0.14]],0.003);
+  } else if(kind==='Lightning') {
+    belt();boots(0.34,0x69533f);
+    const burgundy=mat(0xc41f34,0.7),steel=mat(0x555b62,0.48,0.35);
+    band(chest,burgundy,0.306,0.061,0.058,0.09);
+    panel(chest,burgundy,[[-0.028,0.30,0.152],[0,0.025,0.156],[0.031,0.30,0.152]]);
+    for(const side of [-1,1]) {
+      strap([[side*0.10,0.26,0.091],[side*0.11,0.06,0.145],[side*0.07,-0.16,0.116]],leather,0.02);
+    }
+    band(chest,leather,-0.08,0.144,0.115,0.07);buckle(chest,0,-0.08,0.125,0.059,0.055);
+    // A split red mantle, mounted on the torso so it follows crawl and falls.
+    for(const side of [-1,1]){
+      panel(chest,burgundy,[[side*0.015,0.27,-0.14],[side*0.17,0.22,-0.13],[side*0.36,-0.72,-0.26],[side*0.06,-0.86,-0.24]]);
+      tube(chest,glow,[[side*0.17,0.22,-0.135],[side*0.36,-0.72,-0.265]],0.005);
+    }
+    oval(chest,steel,-0.183,0.24,0,0.10,0.052,0.113);
+    for(let i=0;i<3;i++)box(chest,silver,-0.193,0.255,0.055-i*0.05,0.078,0.012,0.012);
+    band(arms[0].segments[0],leather,0.2,0.061,0.061,0.14);
+    holster(parts.legL,-1);
+  } else if(kind==='Squall'||kind==='Aeris') {
+    // Open jacket with shaped lapels, seams and hardware over a pale shirt.
+    const shirt=mat(kind==='Squall'?0xe0dfd5:0xd4b9ad),lining=mat(kind==='Squall'?0x393d43:0x682431);
+    torso.material=shirt;
+    garment(cloth,0.24,kind==='Aeris'?-0.14:-0.20,0.40);
+    for(const side of [-1,1]) {
+      panel(chest,lining,[[side*0.052,0.30,0.153],[side*0.119,0.235,0.155],[side*0.084,0.12,0.158],[side*0.046,0.19,0.158]]);
+      tube(chest,silver,[[side*0.061,-0.10,0.124],[side*0.06,0.06,0.149],[side*0.046,0.19,0.159]],0.002);
+      oval(chest,silver,side*0.085,0.18,0.161,0.006,0.006,0.003);
+    }
+    belt(0.07);boots(kind==='Aeris'?0.20:0.27,kind==='Aeris'?0x60462f:0x25282b);
+    if(kind==='Squall') {
+      const fur=mat(0xf4f1ea,0.96);
+      // A continuous collar with staggered tapered tufts, not a row of beads.
+      const collarPoints=[[-0.13,0.22,0.17],[-0.145,0.30,0.095],[-0.09,0.34,-0.045],[0,0.35,-0.085],[0.09,0.34,-0.045],[0.145,0.30,0.095],[0.13,0.22,0.17]];
+      tube(chest,fur,collarPoints,0.05);
+      const collarCurve=new THREE.CatmullRomCurve3(collarPoints.map(p=>new THREE.Vector3(...p)));
+      for(let i=0;i<30;i++){
+        const p=collarCurve.getPoint(i/29);
+        const tuft=add(chest,new THREE.ConeGeometry(0.03,0.085+(i%3)*0.015,5),fur,p.x,p.y-0.02,p.z+0.022);
+        tuft.rotation.set(2.2,0,-Math.sign(p.x)*0.6);
+      }
+      for(const y of [0.0,-0.067]){band(body,leather,y,0.177,0.139,0.027);buckle(body,0.047,y,0.148,0.04,0.033);}
+      tube(chest,silver,[[-0.05,0.30,0.06],[0,0.085,0.145],[0.05,0.30,0.06]],0.0025);
+      const pendant=add(chest,new THREE.ConeGeometry(0.016,0.043,5),silver,0,0.068,0.15);pendant.rotation.z=Math.PI;
+      // gunblade slung hilt-up behind the right shoulder: the grip breaks the head's outline
+      const blade=new THREE.Group();blade.position.set(0,0.08,-0.2);blade.rotation.z=0.5;chest.add(blade);
+      box(blade,silver,0,-0.12,0,0.075,0.80,0.012);box(blade,glow,-0.04,-0.12,0,0.007,0.78,0.016);
+      box(blade,dark,0,0.30,0,0.12,0.05,0.045);box(blade,dark,0,0.40,0,0.035,0.16,0.035);
+      box(blade,silver,0,0.34,0.03,0.04,0.09,0.03);
+      tube(head,mat(0xa16d5b),[[-0.023,0.215,0.081],[-0.006,0.188,0.089],[0.018,0.15,0.085]],0.0018);
+    } else {
+      const dress=mat(0xe98aa8,0.78);
+      const skirt=add(body,new THREE.CylinderGeometry(0.16,0.275,0.65,36,1,true),dress,0,-0.225,0);skirt.scale.z=0.8;
+      band(body,glow,-0.545,0.273,0.219,0.01);
+      for(let i=0;i<12;i++){
+        const a=i/12*Math.PI*2;
+        tube(body,mat(0xc9738f),[[Math.sin(a)*0.165,0.09,Math.cos(a)*0.131],[Math.sin(a)*0.205,-0.20,Math.cos(a)*0.166],[Math.sin(a)*0.273,-0.54,Math.cos(a)*0.218]],0.002);
+      }
+      for(const side of [-1,1])box(chest,vest,side*0.122,0.005,0.13,0.055,0.046,0.008);
+      band(head,dark,0.027,0.045,0.046,0.015);
+      oval(head,brass,0,0.025,0.04,0.009,0.012,0.004);
+      for(const arm of arms)for(let i=0;i<3;i++)band(arm.segments[1],i%2?brass:leather,0.30-i*0.12,0.041,0.041,0.065);
+    }
+  }
+}
+
 function buildGun(parts, loadout) {
   const rifle = parts.rifle, V = (x, y, z) => new THREE.Vector3(x, y, z);
   const gun = enemyShared.gun;
@@ -7005,8 +7373,9 @@ function buildHand(mat, side, scale = 1) {
 
 // hostile: per-enemy cloth/vest clones so the hit flash can tint just them
 function buildSoldier(operator = false) {
-  const person = operator ? {name:'Operator',gender:'man',skin:0x8a6f58,hair:0x211a16,cloth:0x657789} : ENEMY_PEOPLE[enemyPersonIndex % ENEMY_PEOPLE.length];
-  const loadout = operator ? ENEMY_LOADOUTS[1] : (enemyPersonIndex++, ENEMY_LOADOUTS.find(l => l.name === WEAPON_OF[person.name]) || ENEMY_LOADOUTS[1]);
+  const person = operator ? {name:'Operator',gender:'man',skin:0x8a6f58,hair:0x211a16,cloth:0x657789} : nextEnemyPerson();
+  if (!person) return null;
+  const loadout = operator ? ENEMY_LOADOUTS[1] : ENEMY_LOADOUTS.find(l => l.name === WEAPON_OF[person.name]);
   const palette = operator ? operatorShared : enemyShared;
   const cloth = palette.cloth.clone(); cloth.color.setHex(person.cloth);
   const vest = palette.vest.clone();
@@ -7146,7 +7515,7 @@ scene.add(agent.g);    // v3.59: was world.add — the day map's group, hidden o
 
 function spawnEnemy() {
   let x, z, tries = 0;
-  if (Pursuit.on && Pursuit.trySpawnCar()) return;   // some of them come in cars
+  if (Pursuit.on && Pursuit.trySpawnCar()) return true;   // some of them come in cars
   if (Pursuit.on) {
     [x, z] = Pursuit.footSpawn();
   } else if (curMap === "arena") {
@@ -7170,6 +7539,7 @@ function spawnEnemy() {
     } while (!canStand(x, z, 0.4) && tries < 40);
   }
   const parts = buildSoldier();
+  if (!parts) return false;
   parts.g.position.set(x, 0, z);
   scene.add(parts.g);
   enemies.push({
@@ -7185,6 +7555,7 @@ function spawnEnemy() {
     nextStep: rand(0.5, 4), stance: Math.random() < 0.5 ? 1 : -1,
     idleL: 0, vx: 0, vz: 0, speed: 0, bumpT: 0,
   });
+  return true;
 }
 
 // ------------------------------------------------- tracer + spark pools
@@ -7365,6 +7736,7 @@ function feedKill(label) {
 }
 
 function killEnemy(e, ix, iz, label) {
+  enemyLastSeen.set(e.person.name, enemyAppearance);
   enemies.splice(enemies.indexOf(e), 1);
   kills++;
   const d = Math.hypot(e.x - player.x, e.z - player.z);
@@ -7992,7 +8364,7 @@ function update(dt) {
   if (spawnQueue > 0) {
     spawnTimer -= dt;
     if (spawnTimer <= 0 && enemies.length + Pursuit.cars.length < 7) {
-      spawnEnemy(); spawnQueue--;
+      if (spawnEnemy()) spawnQueue--;
       spawnTimer = rand(0.6, 1.8);
     }
   } else if (enemies.length === 0 && Pursuit.cars.length === 0) {
@@ -8539,6 +8911,8 @@ const Pursuit = (() => {
 
   // ----------------------------------------------------------- hostile cars
   function spawnCar() {
+    const shooter = buildSoldier();
+    if (!shooter) return false;
     const s = dirSign();
     const behind = Math.random() < 0.72;
     const z = S.z + (behind ? -s : s) * rand(40, 58);
@@ -8550,7 +8924,6 @@ const Pursuit = (() => {
     const glow = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 8), new THREE.MeshBasicMaterial({
       map: poolTex, color: 0x6a6258, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false }));
     glow.rotation.x = -Math.PI / 2; glow.position.set(0, -0.02, -7); g.add(glow);
-    const shooter = buildSoldier();
     shooter.prone = 0; shooter.recoil = 0;
     shooter.legL.visible = shooter.legR.visible = false;
     for(const child of shooter.g.children) if(child.geometry?.type === 'CircleGeometry') child.visible = false;
@@ -8566,12 +8939,12 @@ const Pursuit = (() => {
                 hitFlash: 0, muzzle: 0, t: 0, vx: 0, vz: 0 };
     g.position.set(x, 0.06, z); g.rotation.y = c.h;
     cars.push(c);
+    return true;
   }
   function trySpawnCar() {
     const cap = Math.min(3, 1 + Math.floor((wave + 1) / 2));
     if (cars.length >= cap || Math.random() > 0.55) return false;
-    spawnCar();
-    return true;
+    return spawnCar();
   }
   // foot soldiers: at the kerbs AHEAD of the car, so you drive into them
   function footSpawn() {
@@ -8791,6 +9164,7 @@ const Pursuit = (() => {
   }
 
   function explode(c, label) {
+    enemyLastSeen.set(c.shooter.person.name, enemyAppearance);
     cars.splice(cars.indexOf(c), 1);
     kills++;
     feedKill(label);
@@ -8810,7 +9184,7 @@ const Pursuit = (() => {
     c.hull.material.color.setHex(0x0a0908);
     c.hull.material.emissive.setRGB(0.25, 0.05, 0);
     c.g.traverse(o => { if (o.isMesh && o.material.isMeshBasicMaterial && o !== c.hull) o.material.color.multiplyScalar(0.08); });
-    wrecks.push({ g: c.g, x: c.x, z: c.z, y: 0.06, vx: c.vx * 0.55, vz: c.vz * 0.55, vy: rand(5, 7.5),
+    wrecks.push({ g: c.g, shooter: c.shooter, x: c.x, z: c.z, y: 0.06, vx: c.vx * 0.55, vz: c.vz * 0.55, vy: rand(5, 7.5),
                   rx: 0, rz: 0, srx: rand(-5, 5), srz: rand(-7, 7), t: 0, burnT: 0, settled: false });
     if (kills > 0 && kills % 5 === 0)
       Comms.request("streak", `Operative just hit ${kills} kills on wave ${wave}, riding the Sunset Viaduct. Health ${player.hp | 0}%.`);
@@ -8900,7 +9274,7 @@ const Pursuit = (() => {
   }
 
   return {
-    get on() { return S.on; }, cars, state: S,
+    get on() { return S.on; }, cars, wrecks, state: S,
     setOn, reset, drive, pose, rayCars, hitCar, trySpawnCar, footSpawn, SEAT_Y,
     quiet() { if (S.built) Audio_.engine(0, 40); },
   };
@@ -9257,7 +9631,7 @@ try {                             // operative's last pick survives reloads
 } catch (e) {}
 setEnvironment(bootEnv);          // L cycles day -> cyberpunk -> hunted
 Comms.init();
-toast("STREET/AGENT v3.60 · " + ENV[envName].label);
+toast("STREET/AGENT v3.62 · " + ENV[envName].label);
 requestAnimationFrame(frame);
 
 // ?play=1 skips the menu (useful for kiosks, screenshots and testing).
