@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>STREET / AGENT v3.64</title>
+<title>STREET / AGENT v3.65</title>
 <style>
   :root {
     --amber: #ffb347;
@@ -224,7 +224,7 @@
   <div class="box">
     <h1>STREET <span>/</span> AGENT</h1>
     <div class="sub" id="ovsub">Sector 7 · night watch</div>
-    <div class="verline">v3.64 — 12-person cast: the original six + six reference characters · C to crawl · PURSUIT: N = restart · K lights · F reflections · VERTICAL 9:16 (O)</div>
+    <div class="verline">v3.65 — six ways to die: headshot, blown back, spin, kneel, slump, fall · 12-person cast · C to crawl · PURSUIT: N = restart · K lights · F reflections · VERTICAL 9:16 (O)</div>
     <div class="profiles">
       <button id="profDay" class="pbtn" type="button">DAY</button>
       <button id="profCyber" class="pbtn" type="button">CYBERPUNK</button>
@@ -477,7 +477,7 @@ function setMSAASamples(n) {
 function updateBadge() {
   const el = document.getElementById("ver");
   const MAPTAG = { street: "SECTOR 7", arena: "OVERRUN YARD", neon: "SUNSET VIADUCT" };
-  if (el) el.innerHTML = 'STREET/AGENT <b>v3.64</b> · ' + (envName === "pursuit" ? "IN THE CAR" : (thirdPerson ? "3RD" : "1ST") + " PERSON" + (player.crawling ? " · CRAWLING" : "")) + " · "
+  if (el) el.innerHTML = 'STREET/AGENT <b>v3.65</b> · ' + (envName === "pursuit" ? "IN THE CAR" : (thirdPerson ? "3RD" : "1ST") + " PERSON" + (player.crawling ? " · CRAWLING" : "")) + " · "
     + ENV[envName].label + " · " + (MAPTAG[curMap] || curMap.toUpperCase());
 }
 
@@ -7678,17 +7678,17 @@ function playerShoot() {
     dir = f.addScaledVector(r, rand(-sp, sp)).addScaledVector(u, rand(-sp, sp)).normalize();
   }
   const RANGE = drive ? 95 : 46;
-  let best = null, bestT = Infinity;
+  let best = null, bestT = Infinity, bestWhere = 'body';
   for (const e of enemies) {
     e.g.updateMatrixWorld(true);
     // Follow the actual torso/head when crouched or stretched out prone.
-    for (const [part, local, radius] of [[e.body,new THREE.Vector3(0,0.15,0),0.29], [e.upper,new THREE.Vector3(0,0.15,0),0.30], [e.headPivot,new THREE.Vector3(0,0.15,0),0.16]]) {
+    for (const [part, local, radius, where] of [[e.body,new THREE.Vector3(0,0.15,0),0.29,'body'], [e.upper,new THREE.Vector3(0,0.15,0),0.30,'body'], [e.headPivot,new THREE.Vector3(0,0.15,0),0.16,'head']]) {
       const center=part.localToWorld(local);
       const vx=center.x-ox,vy=center.y-oy,vz=center.z-oz;
       const t=vx*dir.x+vy*dir.y+vz*dir.z;
       if(t<0.4 || t>RANGE || t>=bestT)continue;
       if(Math.hypot(vx-dir.x*t,vy-dir.y*t,vz-dir.z*t)>radius)continue;
-      if(los(ox,oz,center.x,center.z,oy,center.y)){bestT=t;best=e;}
+      if(los(ox,oz,center.x,center.z,oy,center.y)){bestT=t;best=e;bestWhere=where;}
     }
   }
   const carHit = drive ? Pursuit.rayCars(ox, oy, oz, dir, best ? bestT : RANGE) : null;
@@ -7720,7 +7720,7 @@ function playerShoot() {
     Audio_.flesh();
     const wound = best.upper.localToWorld(new THREE.Vector3(0,0.1,0));
     bloodAt(wound.x, wound.y, wound.z, 8);
-    if (best.hp <= 0) killEnemy(best, dir.x, dir.z);
+    if (best.hp <= 0) killEnemy(best, dir.x, dir.z, bestWhere === 'head' ? "Headshot" : null, bestWhere);
   }
 }
 
@@ -7735,19 +7735,36 @@ function feedKill(label) {
   setTimeout(() => d.remove(), 2600);
 }
 
-function killEnemy(e, ix, iz, label) {
+// v3.65: six ways to go down, picked by how the shot landed — a head hit
+// cuts the strings, a point-blank or car hit throws the body, the rest vary
+// at random (never the same one twice in a row).
+let lastDeath = null;
+function pickDeath(e, d, where, label) {
+  if ((e.prone || 0) > 0.3) return 'classic';                 // already on the ground
+  if (label && /Roadkill/.test(label)) return 'blown';
+  if (where === 'head' && Math.random() < 0.85) return 'headshot';
+  if (d < 6 && Math.random() < 0.7) return 'blown';
+  const pool = ['classic', 'spin', 'kneel', 'slump'].filter(k => k !== lastDeath);
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+function killEnemy(e, ix, iz, label, where) {
   enemyLastSeen.set(e.person.name, enemyAppearance);
   enemies.splice(enemies.indexOf(e), 1);
   kills++;
   const d = Math.hypot(e.x - player.x, e.z - player.z);
   feedKill(label || ("Grunt · " + (d > 25 ? "Longshot" : d < 6 ? "Point Blank" : "Close")));
+  const death = window.__forceDeath || pickDeath(e, d, where, label);
+  lastDeath = death;
   // v3.59: knees buckle, then the body goes down — away from the shot
   // (backward) most of the time, forward onto the face now and then.
   const fwd = Math.random() < 0.3;
+  const roadkill = !!(label && /Roadkill/.test(label));
+  const push = death === 'blown' ? (roadkill ? rand(1.3, 1.7) : rand(3.6, 4.6)) : death === 'slump' ? 1.25 : rand(0.6, 1.1);
   corpses.push({
-    ...e, t: 0, life: 7, settled: false,
-    vx: ix * rand(0.6, 1.1), vz: iz * rand(0.6, 1.1),
+    ...e, t: 0, life: 7, settled: false, death,
+    vx: ix * push, vz: iz * push,
     fall: fwd ? 1.48 : -1.50, roll: rand(-0.3, 0.3), y0: e.g.position.y,
+    side: Math.random() < 0.5 ? -1 : 1, yaw0: e.g.rotation.y, h: e.g.scale.y, spin: (Math.random() < 0.5 ? -1 : 1) * rand(2.2, 3.1),
     legs0: [e.legL, e.legR].map(l => [l.rotation.x, l.knee.rotation.x]),
   });
   faceClose(e.headPivot);
@@ -7761,12 +7778,142 @@ function killEnemy(e, ix, iz, label) {
     return { arm, sh, el0, h0, el1: sh.clone().add(new THREE.Vector3(arm.side * 0.05, -0.27, 0.03)), h1: sh.clone().add(new THREE.Vector3(arm.side * 0.09, -0.53, 0.07)) };
   });
   c0.gun0 = { p: e.rifle.position.clone(), r: e.rifle.rotation.x };
-  bloodAt(e.x, 1.0, e.z, 16);
+  if (death === 'headshot') { const hp = e.headPivot.localToWorld(new THREE.Vector3(0, 0.15, 0)); bloodAt(hp.x, hp.y, hp.z, 22); }
+  else bloodAt(e.x, 1.0, e.z, 16);
   Audio_.kill();
   if (kills > 0 && kills % 5 === 0) {
     Comms.request("streak", `Operative just hit ${kills} kills on wave ${wave}. Health ${player.hp | 0}%.`);
   }
   updHud();
+}
+
+const smooth01 = k => { k = clamp(k, 0, 1); return k * k * (3 - 2 * k); };
+const approach = (v, target, rate, dt) => v + (target - v) * Math.min(1, dt * rate);
+const DROPPED_GUN = new THREE.Vector3(0.33, 0.55, 0.06);     // the gun hangs down the body's side
+const ARM_POSES = {                                          // shoulder -> elbow, shoulder -> hand
+  hang: [[0.05, -0.27, 0.03], [0.09, -0.53, 0.07]],          // limp at the sides
+  up:   [[0.22, 0.12, -0.05], [0.40, 0.30, -0.12]],          // thrown over the head
+  out:  side => [[0.24, 0.05 * side - 0.02, -0.06], [0.40, 0.24 * side - 0.08, -0.20]],   // flung by a spin: one high, one low, elbows loose
+};
+function deathSlide(c, dt, until, drag) {
+  if (c.t >= until) return;
+  c.x += c.vx * dt; c.z += c.vz * dt; c.vx *= drag; c.vz *= drag;
+  if (hitsAny(c.x, c.z, colliders, 0.3)) { c.x -= c.vx * dt; c.z -= c.vz * dt; c.vx = c.vz = 0; }
+}
+function deathLegs(c, f) {
+  c.legs0.forEach(([hx, kx], i) => { const leg = i ? c.legR : c.legL; const [h, k] = f(i, hx, kx); leg.rotation.x = h; leg.knee.rotation.x = k; });
+}
+function deathArms(c, m, pose) {
+  if (!c.limp) return;
+  for (const L of c.limp) {
+    const P = ARM_POSES[pose], [el, h] = typeof P === 'function' ? P(L.arm.side) : P;
+    const el1 = L.sh.clone().add(new THREE.Vector3(L.arm.side * el[0], el[1], el[2]));
+    const h1 = L.sh.clone().add(new THREE.Vector3(L.arm.side * h[0], h[1], h[2]));
+    limbPose(L.arm, L.sh, L.el0.clone().lerp(el1, m), L.h0.clone().lerp(h1, m), null);
+  }
+  c.rifle.position.lerpVectors(c.gun0.p, DROPPED_GUN, m);
+  c.rifle.rotation.x = c.gun0.r + (Math.PI / 2 - c.gun0.r) * m;
+}
+function deathLanded(c, done) { if (!c.settled && done) { c.settled = true; Audio_.flesh(); } }
+function animateDeath(c, dt) {
+  const t = c.t, yaw = c.g.rotation.y;
+  switch (c.death) {
+    case 'headshot': {
+      // strings cut: the head snaps back, the knees go at once and the body
+      // drops almost straight down before folding over sideways
+      const b = smooth01(t / 0.16), k2r = clamp((t - 0.14) / 0.5, 0, 1), k2 = k2r * k2r;
+      deathSlide(c, dt, 0.3, 0.85);
+      deathLegs(c, (i, hx, kx) => { const bx = -0.95 - i * 0.25, bk = 1.95 + i * 0.2; return [hx + (bx - hx) * b + (0.1 - bx) * k2, kx + (bk - kx) * b + (0.4 - bk) * k2]; });
+      c.headPivot.rotation.x = t < 0.12 ? approach(c.headPivot.rotation.x, -1.0, 30, dt) : approach(c.headPivot.rotation.x, 0.35, 4, dt);
+      c.upper.rotation.x = approach(c.upper.rotation.x, t < 0.12 ? -0.3 : 0.25, 8, dt);
+      if (t < 0.35) deathArms(c, smooth01(t / 0.2), 'hang');
+      c.y = (c.y0 - 0.48 * c.h * b) * (1 - k2) + 0.14 * k2;
+      c.g.position.set(c.x, c.y, c.z);
+      c.g.rotation.set(-0.85 * k2, yaw, c.side * 1.2 * k2);   // twisted onto the back: a cape or skirt lies down with it
+      deathLanded(c, k2r >= 1);
+      break;
+    }
+    case 'blown': {
+      // thrown off the feet: a short flight, arms over the head, landing flat
+      // on the back and skidding along the wet road
+      const air = t < 0.5 ? Math.sin(Math.PI * t / 0.5) * 0.34 : 0, k2r = clamp(t / 0.45, 0, 1), k2 = smooth01(k2r);
+      deathSlide(c, dt, 1.2, t < 0.5 ? 0.99 : 0.86);
+      deathLegs(c, (i, hx, kx) => { const m = smooth01(t / 0.25); return [hx + (-0.5 - i * 0.2 - hx) * m, kx + (0.25 + i * 0.3 - kx) * m]; });
+      c.headPivot.rotation.x = approach(c.headPivot.rotation.x, -0.55, 10, dt);
+      c.upper.rotation.x = approach(c.upper.rotation.x, -0.25, 8, dt);
+      if (t < 0.4) deathArms(c, smooth01(t / 0.25), 'up');
+      c.y = (c.y0 + air) * (1 - k2) + (0.14 + air) * k2;
+      c.g.position.set(c.x, c.y, c.z);
+      c.g.rotation.set(-1.52 * k2, yaw, c.roll * 0.4 * k2);
+      deathLanded(c, t >= 0.5);
+      break;
+    }
+    case 'spin': {
+      // spun round by the hit, arms flung wide, then down on the face
+      c.g.rotation.y = c.yaw0 + c.spin * smooth01(t / 0.75);
+      const b = smooth01(t / 0.55), k2r = clamp((t - 0.45) / 0.55, 0, 1), k2 = k2r * k2r;
+      deathSlide(c, dt, 0.6, 0.93);
+      deathLegs(c, (i, hx, kx) => { const bx = -0.45 - i * 0.2, bk = 1.1 + i * 0.3; return [hx + (bx - hx) * b + (0.05 - bx) * k2, kx + (bk - kx) * b + (0.3 - bk) * k2]; });
+      c.headPivot.rotation.z = approach(c.headPivot.rotation.z, c.spin > 0 ? 0.4 : -0.4, 5, dt);
+      c.upper.rotation.x = approach(c.upper.rotation.x, 0.3, 4, dt);
+      if (t < 1.0) deathArms(c, smooth01(t / 0.3) * (1 - 0.5 * k2), 'out');
+      c.y = (c.y0 - 0.30 * b) * (1 - k2) + 0.14 * k2;
+      c.g.position.set(c.x, c.y, c.z);
+      c.g.rotation.set(1.46 * k2, c.g.rotation.y, c.roll * 1.4 * k2);
+      deathLanded(c, k2r >= 1);
+      break;
+    }
+    case 'kneel': {
+      // down onto both knees, a moment swaying there with the head dropping,
+      // then forward onto the face
+      const kn = smooth01(t / 0.35), k2r = clamp((t - 1.35) / 0.55, 0, 1), k2 = k2r * k2r;
+      deathSlide(c, dt, 0.25, 0.8);
+      deathLegs(c, (i, hx, kx) => [hx + (0.02 - hx) * kn + 0.03 * k2, kx + (1.55 - kx) * kn + (0.3 - 1.55) * k2]);
+      c.upper.rotation.x = approach(c.upper.rotation.x, 0.28, 3, dt);
+      c.upper.rotation.z = Math.sin(t * 4.5) * 0.09 * kn * (1 - k2);
+      c.headPivot.rotation.x = approach(c.headPivot.rotation.x, 0.75, 2.2, dt);
+      if (t < 0.7) deathArms(c, smooth01(t / 0.55), 'hang');
+      c.y = (c.y0 - 0.37 * c.h * kn) * (1 - k2) + 0.14 * k2;
+      c.g.position.set(c.x, c.y, c.z);
+      c.g.rotation.set(1.46 * k2, yaw, c.roll * 0.5 * k2);
+      deathLanded(c, k2r >= 1);
+      break;
+    }
+    case 'slump': {
+      // staggers back a few steps, sits down hard and slumps forward — and
+      // stays sitting there
+      const walk = 1 - smooth01(t / 0.7), s = smooth01((t - 0.6) / 0.35), m = smooth01((t - 0.95) / 0.5);
+      deathSlide(c, dt, 0.75, 0.975);
+      deathLegs(c, (i, hx, kx) => {
+        const swing = Math.sin(t * 13 + i * Math.PI) * 0.42 * walk;
+        return [(hx + swing) * (1 - s) + (-1.5 + i * 0.1) * s, (kx + Math.max(0, swing) * 0.6) * (1 - s) + (0.35 + i * 0.45) * s];   // seat on the road, legs out
+      });
+      c.upper.rotation.x = t < 0.8 ? approach(c.upper.rotation.x, -0.35, 6, dt) : -0.35 + 1.25 * m;
+      c.headPivot.rotation.x = approach(c.headPivot.rotation.x, t < 0.8 ? -0.3 : 0.6, 3, dt);
+      c.headPivot.rotation.z = approach(c.headPivot.rotation.z, c.side * 0.35 * m, 3, dt);
+      if (t < 0.8) deathArms(c, smooth01(t / 0.6), 'hang');
+      c.y = c.y0 - 0.62 * c.h * s;
+      c.g.position.set(c.x, c.y, c.z);
+      c.g.rotation.set(-0.12 * walk, yaw, c.side * 0.12 * m);
+      deathLanded(c, t >= 0.95);
+      break;
+    }
+    default: {
+      // v3.59 classic: knees go (0-0.35 s), then the body topples (0.2-0.85 s)
+      const k1 = Math.min(1, t / 0.35), b = k1 * k1 * (3 - 2 * k1);
+      const k2r = clamp((t - 0.20) / 0.65, 0, 1), k2 = k2r * k2r;
+      deathSlide(c, dt, 0.5, 0.9);
+      deathLegs(c, (i, hx, kx) => { const bx = -0.55 - i * 0.2, bk = 1.25 + i * 0.25; return [hx + (bx - hx) * b + (0.05 - bx) * k2, kx + (bk - kx) * b + (0.35 - bk) * k2]; });
+      c.upper.rotation.x = approach(c.upper.rotation.x, c.fall > 0 ? 0.3 : -0.4, 6, dt);
+      c.headPivot.rotation.x = approach(c.headPivot.rotation.x, c.fall > 0 ? 0.2 : -0.5, 5, dt);
+      c.headPivot.rotation.z = approach(c.headPivot.rotation.z, c.roll * 1.6, 4, dt);
+      if (t < 0.6) deathArms(c, smooth01(t / 0.45), 'hang');
+      c.y = (c.y0 - 0.30 * b) * (1 - k2) + 0.14 * k2;
+      c.g.position.set(c.x, c.y, c.z);
+      c.g.rotation.set(c.fall * k2, yaw, c.roll * k2);
+      deathLanded(c, k2r >= 1);
+    }
+  }
 }
 
 const enemyMuzzle = new THREE.Vector3();
@@ -8308,30 +8455,7 @@ function update(dt) {
     const c = corpses[i];
     c.t += dt;
     if (c.fall !== undefined) {
-      // knees go (0-0.35 s), then the body topples to the ground (0.2-0.85 s)
-      const k1 = Math.min(1, c.t / 0.35), b = k1 * k1 * (3 - 2 * k1);
-      const k2r = clamp((c.t - 0.20) / 0.65, 0, 1), k2 = k2r * k2r;
-      if (c.t < 0.5) { c.x += c.vx * dt; c.z += c.vz * dt; c.vx *= 0.9; c.vz *= 0.9;
-        if (hitsAny(c.x, c.z, colliders, 0.3)) { c.x -= c.vx * dt; c.z -= c.vz * dt; c.vx = c.vz = 0; } }
-      c.legs0.forEach(([hx, kx], i) => {
-        const leg = i ? c.legR : c.legL;
-        const bx = -0.55 - i * 0.2, bk = 1.25 + i * 0.25;          // buckled
-        leg.rotation.x = hx + (bx - hx) * b + (0.05 - bx) * k2;     // ... and loose again once down
-        leg.knee.rotation.x = kx + (bk - kx) * b + (0.35 - bk) * k2;
-      });
-      c.upper.rotation.x += ((c.fall > 0 ? 0.3 : -0.4) - c.upper.rotation.x) * Math.min(1, dt * 6);
-      c.headPivot.rotation.x += ((c.fall > 0 ? 0.2 : -0.5) - c.headPivot.rotation.x) * Math.min(1, dt * 5);
-      c.headPivot.rotation.z += (c.roll * 1.6 - c.headPivot.rotation.z) * Math.min(1, dt * 4);
-      if (c.limp && c.t < 0.6) {
-        const k = Math.min(1, c.t / 0.45), m = k * k * (3 - 2 * k);
-        for (const L of c.limp) limbPose(L.arm, L.sh, L.el0.clone().lerp(L.el1, m), L.h0.clone().lerp(L.h1, m), null);
-        c.rifle.position.lerpVectors(c.gun0.p, new THREE.Vector3(0.33, 0.55, 0.06), m);
-        c.rifle.rotation.x = c.gun0.r + (Math.PI / 2 - c.gun0.r) * m;
-      }
-      c.y = (c.y0 - 0.30 * b) * (1 - k2) + 0.14 * k2;
-      c.g.position.set(c.x, c.y, c.z);
-      c.g.rotation.set(c.fall * k2, c.g.rotation.y, c.roll * k2);
-      if (!c.settled && k2r >= 1) { c.settled = true; Audio_.flesh(); }
+      animateDeath(c, dt);
     } else {
       c.g.position.set(c.x, c.y || 0, c.z);
     }
@@ -9696,7 +9820,7 @@ window.__sa = {
   setAiming: v => { aiming = !!v; }, getAds: () => player.ads,
   agent, getThirdPerson: () => thirdPerson, setThirdPerson: v => { thirdPerson = !!v; updateBadge(); },
   setEnvironment, ENV, ENV_ORDER, getEnv: () => envName, getMap: () => curMap, Pursuit, keys,
-  inStreet, canStand, los, losBlockers, colliders, WORLDS, worldCars, hitsCar, player, MAPS, spawnEnemy, getMode: () => mode, getStuck: () => stuckT, getIsDay: () => envName === "day", enemies, buildSoldier, poseCombatArms, playerShoot, feedKill,
+  inStreet, canStand, los, losBlockers, colliders, WORLDS, worldCars, hitsCar, player, MAPS, spawnEnemy, getMode: () => mode, getStuck: () => stuckT, getIsDay: () => envName === "day", enemies, buildSoldier, poseCombatArms, playerShoot, feedKill, killEnemy, corpses,
   getMode: () => mode, setMode: m => { mode = m; },
   // Freeze a repeatable viewpoint — handy for comparing tiers or grabbing a
   // clean frame: __sa.setMode("pause"); __sa.setView(0, 6, Math.PI);
